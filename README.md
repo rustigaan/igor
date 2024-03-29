@@ -14,7 +14,7 @@ This vendoring tool is similar. It offers inversion-of-control in vendoring depe
 
 It is also possible to have Igor apply selected thundercloud projects to a mathturth' project.
 
-Filenames in both the thundercloud projects and in the `yes-mathtur/nicheName` directories of mathturth' projects are qualified with an infix before the last dot to denote their function.
+Filenames in both the thundercloud projects and in the `yeth-mathtur/nicheName` directories of mathturth' projects are qualified with an infix before the last dot to denote their function.
 
 * Option: `basename-option+featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file
 * Unnamed fragment: `basename-fragment+featureName.ext` replaces placeholders with the ID `featureName` in `basename.ext` only if the feature is turned on in the settings file
@@ -47,13 +47,13 @@ Examples of lightning files:
 * `Cargo-fragment+tokio-build_deps.toml` replaces placeholder `build_deps` in `Cargo.toml` if feature `tokio` is selected
 * `main-ignore+niche.rs` ignores all lightning instructions from this niche for `main.rs`
 
-Minimal settings file `yes-mathtur/async-rust/thettingth.yaml`:
+Minimal settings file `yeth-mathtur/async-rust/thettingth.yaml`:
 ```yaml
 thundercloud:
   directory: "{{WORKAREA}}/async-rust-igor-thundercloud"
 ```
 
-Elaborate settings file `yes-mathtur/dendrite/thettingth.yaml`
+Elaborate settings file `yeth-mathtur/dendrite/thettingth.yaml`
 ```yaml
 %YAML 1.2
 ---

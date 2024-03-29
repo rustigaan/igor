@@ -1,0 +1,3 @@
+---
+thundercloud:
+  directory: "{{PROJECT}}/example-thundercloud"
