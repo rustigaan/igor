@@ -20,6 +20,7 @@ Filenames in both the thundercloud projects and in the `yeth-mathtur/nicheName` 
 
 * Option: `basename+option-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file
 * Example: `basename+example-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file and the file does not exist
+* Overwrite: `basename+overwrite-featureName.ext` signifies that `basename+example-featureName.ext` behaves like an option
 * Unnamed fragment: `basename+fragment-featureName.ext` replaces placeholders with the ID `featureName` in `basename.ext` only if the feature is turned on in the settings file
 * Named fragment: `basename+fragment-featureName-placeholderName.ext` replaces placeholders with the ID `featureName-placeholderName` in `basename.ext` only if the feature is turned on in the settings file
 * Ignore: `basename+ignore-featureName.ext` ignores the instructions for file `basename.ext` in this niche only if the feature is turned on in the settings file (Ignore files are mainly useful in 
@@ -37,7 +38,7 @@ or a block of lines that is delimited by:
 
 The replacement of a placeholder is always a placeholder with the same ID.
 
-Special option `niche` is implicitly selected and cannot be turned off.
+Special option `*` is implicitly selected and cannot be turned off.
 
 Names like featureName and placeholderName must begin with an alphabetic character or an underscore and may only contain alphabetic characters, underscores and numerical digits.
 
