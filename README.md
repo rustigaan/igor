@@ -1,6 +1,8 @@
 # Igor
 
-The Igor vendoring tool is named after a character that appears in several Diskworld novels (my favorite is "Thief of Time"). This character offers a nice metaphor for what this tool tries to provide.
+The Igor vendoring tool offers generic vendoring of common fragments of text files that allow comments.
+
+This tool is named after a character that appears in several Diskworld novels (my favorite is "Thief of Time"). This character offers a nice metaphor for what this tool tries to provide.
 An Igor is an assistant who fills a niche. He uses time-tried solutions (like a good jolt of electricity obtained from a lightning bolt) to make his masters project come alive. There are many Igors, but they are quite interchangeable, so they all use the same name.
 Every Igor has had (and has executed) many surgeries, has many visible scars and talks with a lisp. He isn't pretty, but he does the job.
 
@@ -16,10 +18,11 @@ It is also possible to have Igor apply selected thundercloud projects to a matht
 
 Filenames in both the thundercloud projects and in the `yeth-mathtur/nicheName` directories of mathturth' projects are qualified with an infix before the last dot to denote their function.
 
-* Option: `basename-option+featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file
-* Unnamed fragment: `basename-fragment+featureName.ext` replaces placeholders with the ID `featureName` in `basename.ext` only if the feature is turned on in the settings file
-* Named fragment: `basename-fragment+featureName-placeholderName.ext` replaces placeholders with the ID `featureName-placeholderName` in `basename.ext` only if the feature is turned on in the settings file
-* Ignore: `basename-ignore+featureName.ext` ignores the instructions for file `basename.ext` in this niche only if the feature is turned on in the settings file (Ignore files are mainly useful in 
+* Option: `basename+option-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file
+* Example: `basename+example-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file and the file does not exist
+* Unnamed fragment: `basename+fragment-featureName.ext` replaces placeholders with the ID `featureName` in `basename.ext` only if the feature is turned on in the settings file
+* Named fragment: `basename+fragment-featureName-placeholderName.ext` replaces placeholders with the ID `featureName-placeholderName` in `basename.ext` only if the feature is turned on in the settings file
+* Ignore: `basename+ignore-featureName.ext` ignores the instructions for file `basename.ext` in this niche only if the feature is turned on in the settings file (Ignore files are mainly useful in 
 
 If the basename is empty, then de hyphen that separates the basename from the infix may be omitted (see the example for `.bashrc` below).
 
