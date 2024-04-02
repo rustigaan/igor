@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use ahash::AHashMap;
 use log::{debug, info};
 use serde::Deserialize;
@@ -37,16 +37,18 @@ pub struct GitRemoteConfig {
     on_incoming: Option<OnIncoming>,
 }
 
-pub async fn process_niche(niches_directory: PathBuf, entry: DirEntry) -> anyhow::Result<()> {
-    let mut niche_directory = niches_directory.clone();
+pub async fn process_niche(project_root: impl AsRef<Path>, niches_directory: impl AsRef<Path>, entry: DirEntry) -> anyhow::Result<()> {
+    let mut work_area = project_root.as_ref().to_owned();
+    work_area.push("..");
+    let mut niche_directory = niches_directory.as_ref().to_owned();
     niche_directory.push(entry.file_name());
     let config = get_config(&niche_directory)?;
     if let Some(directory) = config.thundercloud.directory {
         info!("Directory: {directory:?}");
 
         let mut substitutions = AHashMap::new();
-        substitutions.insert("WORKSPACE".to_string(), "..".to_string());
-        substitutions.insert("PROJECT".to_string(), ".".to_string());
+        substitutions.insert("WORKSPACE".to_string(), work_area.to_string_lossy().to_string());
+        substitutions.insert("PROJECT".to_string(), project_root.as_ref().to_string_lossy().to_string());
         let directory = interpolate::interpolate(&directory, substitutions);
 
         let thundercloud_directory = PathBuf::from(directory.into_owned());
@@ -56,8 +58,8 @@ pub async fn process_niche(niches_directory: PathBuf, entry: DirEntry) -> anyhow
     Ok(())
 }
 
-fn get_config(niche_directory: &PathBuf) -> anyhow::Result<NicheConfig> {
-    let mut config_path = niche_directory.clone();
+fn get_config(niche_directory: impl AsRef<Path>) -> anyhow::Result<NicheConfig> {
+    let mut config_path = niche_directory.as_ref().to_owned();
     config_path.push("thettingth.yaml");
     info!("Config path: {config_path:?}");
 

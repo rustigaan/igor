@@ -10,5 +10,5 @@ source "${BIN}/lib-verbose.sh"
 (
   cd "${PROJECT}"
   export RUST_LOG='info,igor=debug'
-  cargo run
+  cargo run -- "$@"
 )

@@ -40,8 +40,6 @@ fn get_config(thundercloud_directory: impl AsRef<Path>) -> Result<ThundercloudCo
     Ok(config)
 }
 
-type FileMapping = AHashMap<String, Vec<(Path,Bolt)>>;
-
 #[derive(Debug)]
 struct BoltCore {
     base_name: String,
@@ -67,6 +65,7 @@ enum Bolt {
 
 trait BoltExt {
     fn bolt_core(&self) -> &BoltCore;
+    fn kind_name(&self) -> &'static str;
     fn base_name(&self) -> String;
     fn extension(&self) -> String;
     fn target_name(&self) -> String;
@@ -84,6 +83,16 @@ impl BoltExt for Bolt {
             Bolt::Unknown { bolt_core, .. } => bolt_core,
         }
     }
+    fn kind_name(&self) -> &'static str {
+        match self {
+            Bolt::Option(_) => "option",
+            Bolt::Example(_) => "example",
+            Bolt::Overwrite(_) => "overwrite",
+            Bolt::Fragment { .. } => "fragment",
+            Bolt::Ignore(_) => "ignore",
+            Bolt::Unknown { .. } => "unknown",
+        }
+    }
     fn base_name(&self) -> String {
         self.bolt_core().base_name.clone()
     }
@@ -91,7 +100,7 @@ impl BoltExt for Bolt {
         self.bolt_core().extension.clone()
     }
     fn target_name(&self) -> String {
-        let mut result = self.base_name().clone();
+        let result = self.base_name().clone();
         result.add(self.extension().as_str())
     }
     fn feature_name(&self) -> String {
@@ -142,7 +151,18 @@ async fn visit(directory: impl AsRef<Path>) -> Result<()> {
         }
     }
     for (target_name, bolts) in &bolts {
-        debug!("Found bolts: {:?}: {:?}: {:?}", directory.as_ref(), target_name, bolts);
+        let mut qualifiers = Vec::new();
+        for bolt in bolts {
+            let qualifier = match bolt {
+                Bolt::Fragment { qualifier, .. } => qualifier,
+                Bolt::Unknown { qualifier, .. } => qualifier,
+                _ => &None
+            };
+            if let Some(qualifier) = qualifier {
+                qualifiers.push(qualifier.to_owned());
+            }
+        }
+        debug!("Found bolts: {:?}: {:?}: {:?}: {:?}", directory.as_ref(), target_name, bolts, qualifiers);
     }
     Ok(())
 }
