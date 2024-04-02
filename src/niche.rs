@@ -52,7 +52,7 @@ pub async fn process_niche(project_root: impl AsRef<Path>, niches_directory: imp
         let directory = interpolate::interpolate(&directory, substitutions);
 
         let thundercloud_directory = PathBuf::from(directory.into_owned());
-        thundercloud::process_niche(&thundercloud_directory, &niche_directory).await?;
+        thundercloud::process_niche(&thundercloud_directory, &niche_directory, project_root).await?;
     }
 
     Ok(())

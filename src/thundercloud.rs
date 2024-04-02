@@ -1,12 +1,18 @@
 use std::hash::Hash;
 use std::ops::Add;
 use anyhow::{bail, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use ahash::AHashMap;
 use log::{debug, info, trace};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
+
+#[derive(Debug)]
+struct ThunderConfig {
+    project_path: PathBuf,
+    niche: NicheConfig,
+}
 
 #[derive(Deserialize,Debug)]
 struct ThundercloudConfig {
@@ -19,13 +25,24 @@ struct NicheConfig {
     description: Option<String>,
 }
 
-pub async fn process_niche(thundercloud_directory: impl AsRef<Path>, niche_directory: impl AsRef<Path>) -> Result<()> {
-    info!("Apply: {:?} -> {:?}", thundercloud_directory.as_ref(), niche_directory.as_ref());
+impl ThunderConfig {
+    fn new(project_path: PathBuf, niche: NicheConfig) -> Self {
+        ThunderConfig {
+            project_path,
+            niche
+        }
+    }
+}
+
+pub async fn process_niche(thundercloud_directory: impl AsRef<Path>, niche_directory: impl AsRef<Path>, project_root: impl AsRef<Path>) -> Result<()> {
+    info!("Apply: {:?} ⊕ {:?} ⇒ {:?}", thundercloud_directory.as_ref(), niche_directory.as_ref(), project_root.as_ref());
     let config = get_config(thundercloud_directory.as_ref())?;
-    info!("Thundercloud: {:?}: {:?}", config.niche.name, config.niche.description.unwrap_or("-".to_string()));
+    let niche = &config.niche;
+    info!("Thundercloud: {:?}: {:?}", niche.name, niche.description.as_ref().unwrap_or(&"-".to_string()));
     let mut cumulus = thundercloud_directory.as_ref().to_owned();
     cumulus.push("cumulus");
-    visit(cumulus).await?;
+    let thunder_config = ThunderConfig::new(project_root.as_ref().to_owned(), config.niche);
+    visit(cumulus, &thunder_config).await?;
     Ok(())
 }
 
@@ -118,8 +135,8 @@ static PLAIN_FILE_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
     Regex::new("^(?<base>.*)(?<extension>[.][^.]*)").unwrap()
 });
 
-async fn visit(directory: impl AsRef<Path>) -> Result<()> {
-    trace!("Visit directory: {:?}", directory.as_ref());
+async fn visit(directory: impl AsRef<Path>, thunder_config: &ThunderConfig) -> Result<()> {
+    trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", directory.as_ref(), thunder_config.project_path, thunder_config.niche);
     let mut bolts = AHashMap::new();
     let mut entries = tokio::fs::read_dir(directory.as_ref()).await?;
     while let Some(entry) = entries.next_entry().await? {
@@ -127,7 +144,7 @@ async fn visit(directory: impl AsRef<Path>) -> Result<()> {
         let mut entry_path = directory.as_ref().to_owned();
         entry_path.push(entry.file_name());
         if entry.file_type().await?.is_dir() {
-            Box::pin(visit(entry.path())).await?;
+            Box::pin(visit(entry.path(), thunder_config)).await?;
         } else {
             let file_name = entry.file_name().to_string_lossy().into_owned();
             let bolt;
