@@ -1,18 +1,13 @@
 use std::hash::Hash;
 use std::ops::Add;
-use anyhow::{bail, Result};
-use std::path::{Path, PathBuf};
+use anyhow::{anyhow, bail, Result};
+use std::path::Path;
 use ahash::AHashMap;
 use log::{debug, info, trace};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
-
-#[derive(Debug)]
-struct ThunderConfig {
-    project_path: PathBuf,
-    niche: NicheConfig,
-}
+use crate::config_model::ThunderConfig;
 
 #[derive(Deserialize,Debug)]
 struct ThundercloudConfig {
@@ -25,24 +20,17 @@ struct NicheConfig {
     description: Option<String>,
 }
 
-impl ThunderConfig {
-    fn new(project_path: PathBuf, niche: NicheConfig) -> Self {
-        ThunderConfig {
-            project_path,
-            niche
-        }
-    }
-}
-
-pub async fn process_niche(thundercloud_directory: impl AsRef<Path>, niche_directory: impl AsRef<Path>, project_root: impl AsRef<Path>) -> Result<()> {
-    info!("Apply: {:?} ⊕ {:?} ⇒ {:?}", thundercloud_directory.as_ref(), niche_directory.as_ref(), project_root.as_ref());
-    let config = get_config(thundercloud_directory.as_ref())?;
+pub async fn process_niche(thunder_config: ThunderConfig) -> Result<()> {
+    let thundercloud_directory = thunder_config.thundercloud_directory();
+    let cumulus = thunder_config.cumulus();
+    let invar = thunder_config.invar();
+    let project_root = thunder_config.project_root();
+    info!("Apply: {:?} ⊕ {:?} ⇒ {:?}", cumulus, invar, project_root);
+    let config = get_config(thundercloud_directory)?;
     let niche = &config.niche;
     info!("Thundercloud: {:?}: {:?}", niche.name, niche.description.as_ref().unwrap_or(&"-".to_string()));
-    let mut cumulus = thundercloud_directory.as_ref().to_owned();
-    cumulus.push("cumulus");
-    let thunder_config = ThunderConfig::new(project_root.as_ref().to_owned(), config.niche);
-    visit(cumulus, &thunder_config).await?;
+    debug!("Use thundercloud: {:?}", thunder_config.use_thundercloud());
+    visit(Path::new("."), &thunder_config).await?;
     Ok(())
 }
 
@@ -136,15 +124,19 @@ static PLAIN_FILE_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
 });
 
 async fn visit(directory: impl AsRef<Path>, thunder_config: &ThunderConfig) -> Result<()> {
-    trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", directory.as_ref(), thunder_config.project_path, thunder_config.niche);
+    trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", directory.as_ref(), thunder_config.project_root(), thunder_config.invar());
     let mut bolts = AHashMap::new();
-    let mut entries = tokio::fs::read_dir(directory.as_ref()).await?;
+    let mut in_cumulus = thunder_config.cumulus().to_owned();
+    in_cumulus.push(directory.as_ref());
+    let in_cumulus = in_cumulus;
+    let mut entries = tokio::fs::read_dir(&in_cumulus).await
+        .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &in_cumulus, e)))?;
     while let Some(entry) = entries.next_entry().await? {
         trace!("Visit entry: {entry:?}");
-        let mut entry_path = directory.as_ref().to_owned();
-        entry_path.push(entry.file_name());
         if entry.file_type().await?.is_dir() {
-            Box::pin(visit(entry.path(), thunder_config)).await?;
+            let mut entry_path = directory.as_ref().to_owned();
+            entry_path.push(entry.file_name());
+            Box::pin(visit(entry_path, thunder_config)).await?;
         } else {
             let file_name = entry.file_name().to_string_lossy().into_owned();
             let bolt;
@@ -179,7 +171,7 @@ async fn visit(directory: impl AsRef<Path>, thunder_config: &ThunderConfig) -> R
                 qualifiers.push(qualifier.to_owned());
             }
         }
-        debug!("Found bolts: {:?}: {:?}: {:?}: {:?}", directory.as_ref(), target_name, bolts, qualifiers);
+        debug!("Found bolts: {:?}: {:?}: {:?}: {:?}", &in_cumulus, target_name, bolts, qualifiers);
     }
     Ok(())
 }

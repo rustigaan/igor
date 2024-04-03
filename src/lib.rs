@@ -3,6 +3,7 @@ use anyhow::Result;
 use clap::Parser;
 use log::{error, info};
 
+mod config_model;
 mod interpolate;
 mod niche;
 mod thundercloud;
