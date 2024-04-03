@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use ahash::AHashMap;
 use log::{debug, info};
+use once_cell::sync::Lazy;
 use serde::Deserialize;
 use tokio::fs::DirEntry;
 use crate::interpolate;
@@ -25,6 +26,19 @@ pub struct ThundercloudConfig {
     directory: Option<String>,
     #[serde(rename = "git-remote")]
     git_remote: Option<GitRemoteConfig>,
+    options: Option<Vec<String>>
+}
+
+static EMPTY_VEC: Lazy<Vec<String>> = Lazy::new(Vec::new);
+
+impl ThundercloudConfig {
+    pub fn options(&self) -> &Vec<String> {
+        if let Some(options) = &self.options {
+            options
+        } else {
+            &EMPTY_VEC
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -64,7 +78,8 @@ fn get_config(niche_directory: impl AsRef<Path>) -> anyhow::Result<NicheConfig> 
     info!("Config path: {config_path:?}");
 
     let file = std::fs::File::open(config_path)?;
-    let config = serde_yaml::from_reader(file)?;
+    let config: NicheConfig = serde_yaml::from_reader(file)?;
     debug!("Niche configuration: {config:?}");
+    debug!("Niche options: {:?}", config.thundercloud.options());
     Ok(config)
 }

@@ -1,3 +1,5 @@
 ---
 thundercloud:
   directory: "{{PROJECT}}/example-thundercloud"
+  options:
+    - glass

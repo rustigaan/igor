@@ -1,0 +1,5 @@
+---
+spring:
+  material: glass
+  delicate: true
+  number-of-coils: 17

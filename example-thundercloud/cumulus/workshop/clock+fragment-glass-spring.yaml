@@ -1,0 +1,5 @@
+---
+spring:
+  material: glass
+  delicate: false
+  number-of-coils: 3
