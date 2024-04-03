@@ -1,5 +1,8 @@
 ---
-thundercloud:
+use-thundercloud:
   directory: "{{PROJECT}}/example-thundercloud"
+  on-incoming: Update
   options:
     - glass
+  params:
+    buyer: Myra LeJean
