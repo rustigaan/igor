@@ -1,13 +1,16 @@
+use std::borrow::Cow;
 use std::hash::Hash;
 use std::ops::Add;
 use anyhow::{anyhow, bail, Result};
 use std::path::Path;
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use log::{debug, info, trace};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
 use crate::config_model::ThunderConfig;
+use crate::path::{AbsolutePath, RelativePath, SingleComponent};
+use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 
 #[derive(Deserialize,Debug)]
 struct ThundercloudConfig {
@@ -30,29 +33,29 @@ pub async fn process_niche(thunder_config: ThunderConfig) -> Result<()> {
     let niche = &config.niche;
     info!("Thundercloud: {:?}: {:?}", niche.name, niche.description.as_ref().unwrap_or(&"-".to_string()));
     debug!("Use thundercloud: {:?}", thunder_config.use_thundercloud());
-    visit(Path::new("."), &thunder_config).await?;
+    visit_subtree(RelativePath::from("."), FromBothCumulusAndInvar, &thunder_config).await?;
     Ok(())
 }
 
-fn get_config(thundercloud_directory: impl AsRef<Path>) -> Result<ThundercloudConfig> {
-    let mut config_path = thundercloud_directory.as_ref().to_owned();
+fn get_config(thundercloud_directory: &AbsolutePath) -> Result<ThundercloudConfig> {
+    let mut config_path = thundercloud_directory.clone();
     config_path.push("thundercloud.yaml");
     info!("Config path: {config_path:?}");
 
-    let file = std::fs::File::open(config_path)?;
+    let file = std::fs::File::open(&*config_path)?;
     let config = serde_yaml::from_reader(file)?;
     debug!("Thundercloud configuration: {config:?}");
     Ok(config)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BoltCore {
     base_name: String,
     extension: String,
     feature_name: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Bolt {
     Option(BoltCore),
     Example(BoltCore),
@@ -75,6 +78,7 @@ trait BoltExt {
     fn extension(&self) -> String;
     fn target_name(&self) -> String;
     fn feature_name(&self) -> String;
+    fn qualifier(&self) -> Option<String>;
 }
 
 impl BoltExt for Bolt {
@@ -111,6 +115,13 @@ impl BoltExt for Bolt {
     fn feature_name(&self) -> String {
         self.bolt_core().feature_name.clone()
     }
+    fn qualifier(&self) -> Option<String> {
+        match self {
+            Bolt::Fragment { qualifier, .. } => qualifier.clone(),
+            Bolt::Unknown { qualifier, .. } => qualifier.clone(),
+            _ => None
+        }
+    }
 }
 
 static BOLT_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
@@ -123,20 +134,137 @@ static PLAIN_FILE_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
     Regex::new("^(?<base>.*)(?<extension>[.][^.]*)").unwrap()
 });
 
-async fn visit(directory: impl AsRef<Path>, thunder_config: &ThunderConfig) -> Result<()> {
-    trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", directory.as_ref(), thunder_config.project_root(), thunder_config.invar());
+#[derive(Clone, Copy)]
+enum Thumbs {
+    FromCumulus,
+    FromInvar,
+    FromBothCumulusAndInvar,
+}
+
+async fn visit_subtree(directory: RelativePath, thumbs: Thumbs, thunder_config: &ThunderConfig) -> Result<()> {
+    let (bolts, cumulus_subdirectories, mut invar_subdirectories) = match thumbs {
+        FromCumulus => {
+            let in_cumulus = directory.clone().relative_to(thunder_config.cumulus());
+            let (bolts, subdirectories) = visit_directory(in_cumulus, thunder_config).await?;
+            (bolts, subdirectories, AHashSet::new())
+        },
+        FromInvar => {
+            let in_invar = directory.clone().relative_to(thunder_config.invar());
+            let (bolts, subdirectories) = visit_directory(in_invar, thunder_config).await?;
+            (bolts, AHashSet::new(), subdirectories)
+        },
+        FromBothCumulusAndInvar => {
+            let in_cumulus = directory.clone().relative_to(thunder_config.cumulus());
+            let (cumulus_bolts, cumulus_subdirectories) = visit_directory(in_cumulus, thunder_config).await?;
+            let in_invar = directory.clone().relative_to(thunder_config.invar());
+            let (invar_bolts, invar_subdirectories) = visit_directory(in_invar, thunder_config).await?;
+            (combine(cumulus_bolts, invar_bolts), cumulus_subdirectories, invar_subdirectories)
+        }
+    };
+    for (key, bolt_list) in bolts {
+        debug!("Bolts entry: {:?}: {:?}", key, bolt_list);
+    }
+    for path in cumulus_subdirectories {
+        let subdirectory_thumbs = if let Some(_) = invar_subdirectories.get(&path) {
+            invar_subdirectories.remove(&path);
+            FromBothCumulusAndInvar
+        } else {
+            FromCumulus
+        };
+        let mut subdirectory = directory.clone();
+        let path: RelativePath = path.try_into()?;
+        subdirectory.push(path);
+        Box::pin(visit_subtree(subdirectory, subdirectory_thumbs, thunder_config)).await?;
+    }
+    for path in invar_subdirectories {
+        let mut subdirectory = directory.clone();
+        let path: RelativePath = path.try_into()?;
+        subdirectory.push(path);
+        Box::pin(visit_subtree(subdirectory, FromInvar, thunder_config)).await?;
+    }
+    Ok(())
+}
+
+fn combine(cumulus_bolts: AHashMap<String,Vec<Bolt>>, invar_bolts: AHashMap<String,Vec<Bolt>>) -> AHashMap<String,Vec<Bolt>> {
+    let mut result = AHashMap::new();
+    let mut cumulus_bolts = cumulus_bolts;
+    let cumulus_bolts_ref = &mut cumulus_bolts;
+    for (key, invar_bolt_list) in invar_bolts {
+        let bolt_list = if let Some(cumulus_bolt_list) = cumulus_bolts_ref.remove(&key) {
+            combine_bolt_lists(cumulus_bolt_list, invar_bolt_list)
+        } else {
+            invar_bolt_list
+        };
+        result.insert(key, bolt_list);
+    }
+    for (key, invar_bolt_list) in cumulus_bolts_ref {
+        result.insert(key.clone(), invar_bolt_list.clone());
+    }
+    result
+}
+
+fn combine_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>) -> Vec<Bolt> {
+    let mut result = invar_bolts_list;
+    for bolt in &result {
+        if let Bolt::Ignore(_) = bolt {
+            let mut ignore_result = Vec::new();
+            ignore_result.push(bolt.to_owned());
+            return ignore_result;
+        }
+    }
+    for cumulus_bolt in &cumulus_bolts_list {
+        let mut add_bolt = Some(Cow::Borrowed(cumulus_bolt));
+        for invar_bolt in &result {
+            if cumulus_bolt.feature_name() != invar_bolt.feature_name() {
+                continue;
+            }
+            if cumulus_bolt.qualifier() != invar_bolt.qualifier() {
+                continue;
+            }
+            match (cumulus_bolt, invar_bolt) {
+                (Bolt::Example(bolt_core), Bolt::Overwrite(_)) => {
+                    add_bolt = Some(Cow::Owned(Bolt::Option(bolt_core.clone())))
+                },
+                (Bolt::Fragment { .. }, Bolt::Fragment { .. }) => {
+                    add_bolt = None;
+                }
+                (_, Bolt::Ignore(_)) => {
+                    let mut ignore_result = Vec::new();
+                    ignore_result.push(invar_bolt.to_owned());
+                    return ignore_result;
+                }
+                (_, _) => ()
+            }
+            if add_bolt.is_none() {
+                break;
+            }
+        }
+        if let Some(add_bolt) = add_bolt {
+            match add_bolt {
+                Cow::Owned(Bolt::Option(_)) => {
+                    result = result.iter().filter(|item| if let Bolt::Overwrite(_) = item { false } else { true }).map(ToOwned::to_owned).collect();
+                    result.insert(0, add_bolt.into_owned())
+                },
+                add_bolt => result.push(add_bolt.into_owned()),
+            }
+        }
+    }
+    result
+}
+
+async fn visit_directory(directory: AbsolutePath, thunder_config: &ThunderConfig) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+    trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", &directory, thunder_config.project_root(), thunder_config.invar());
     let mut bolts = AHashMap::new();
-    let mut in_cumulus = thunder_config.cumulus().to_owned();
-    in_cumulus.push(directory.as_ref());
-    let in_cumulus = in_cumulus;
-    let mut entries = tokio::fs::read_dir(&in_cumulus).await
-        .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &in_cumulus, e)))?;
+    let mut subdirectories = AHashSet::new();
+    let mut entries = tokio::fs::read_dir(&*directory).await
+        .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
     while let Some(entry) = entries.next_entry().await? {
         trace!("Visit entry: {entry:?}");
         if entry.file_type().await?.is_dir() {
-            let mut entry_path = directory.as_ref().to_owned();
-            entry_path.push(entry.file_name());
-            Box::pin(visit(entry_path, thunder_config)).await?;
+            if let Some(component) = entry.path().components().last() {
+                let component = SingleComponent::try_new(Path::new(component.as_os_str()))?;
+                subdirectories.insert(component);
+            }
         } else {
             let file_name = entry.file_name().to_string_lossy().into_owned();
             let bolt;
@@ -171,9 +299,9 @@ async fn visit(directory: impl AsRef<Path>, thunder_config: &ThunderConfig) -> R
                 qualifiers.push(qualifier.to_owned());
             }
         }
-        debug!("Found bolts: {:?}: {:?}: {:?}: {:?}", &in_cumulus, target_name, bolts, qualifiers);
+        debug!("Found bolts: {:?}: {:?}: {:?}: {:?}", &directory, target_name, bolts, qualifiers);
     }
-    Ok(())
+    Ok((bolts, subdirectories))
 }
 
 fn captures_to_bolt(captures: Captures) -> Result<Bolt> {

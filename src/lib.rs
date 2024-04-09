@@ -6,6 +6,7 @@ use log::{error, info};
 mod config_model;
 mod interpolate;
 mod niche;
+mod path;
 mod thundercloud;
 
 use niche::process_niche;

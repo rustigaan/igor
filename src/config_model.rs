@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
 use ahash::AHashMap;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
+use crate::path::AbsolutePath;
 
 #[derive(Deserialize,Debug,Clone)]
 pub enum OnIncoming {
@@ -27,14 +27,14 @@ impl NicheConfig {
 #[derive(Debug)]
 pub struct ThunderConfig {
     use_thundercloud: UseThundercloudConfig,
-    thundercloud_directory: PathBuf,
-    cumulus: PathBuf,
-    invar: PathBuf,
-    project: PathBuf,
+    thundercloud_directory: AbsolutePath,
+    cumulus: AbsolutePath,
+    invar: AbsolutePath,
+    project: AbsolutePath,
 }
 
 impl ThunderConfig {
-    pub fn new(use_thundercloud: UseThundercloudConfig, thundercloud_directory: PathBuf, invar: PathBuf, project: PathBuf) -> Self {
+    pub fn new(use_thundercloud: UseThundercloudConfig, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath) -> Self {
         let mut cumulus = thundercloud_directory.clone();
         cumulus.push("cumulus");
         ThunderConfig {
@@ -50,19 +50,19 @@ impl ThunderConfig {
         &self.use_thundercloud
     }
 
-    pub fn thundercloud_directory(&self) -> &Path {
+    pub fn thundercloud_directory(&self) -> &AbsolutePath {
         &self.thundercloud_directory
     }
 
-    pub fn cumulus(&self) -> &Path {
+    pub fn cumulus(&self) -> &AbsolutePath {
         &self.cumulus
     }
 
-    pub fn invar(&self) -> &Path {
+    pub fn invar(&self) -> &AbsolutePath {
         &self.invar
     }
 
-    pub fn project_root(&self) -> &Path {
+    pub fn project_root(&self) -> &AbsolutePath {
         &self.project
     }
 }
