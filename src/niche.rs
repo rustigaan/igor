@@ -46,13 +46,13 @@ pub async fn process_niche(project_root: impl AsRef<Path>, niches_directory: imp
 
 fn get_config(niche_directory: impl AsRef<Path>) -> anyhow::Result<NicheConfig> {
     let mut config_path = niche_directory.as_ref().to_owned();
-    config_path.push("thettingth.yaml");
+    config_path.push("igor-thettingth.yaml");
     info!("Config path: {config_path:?}");
 
     let file = std::fs::File::open(config_path)?;
     let config: NicheConfig = serde_yaml::from_reader(file)?;
     debug!("Niche configuration: {config:?}");
     let use_thundercloud = config.use_thundercloud();
-    debug!("Niche simplified: {:?}: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.options(), use_thundercloud.params());
+    debug!("Niche simplified: {:?}: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.features(), use_thundercloud.params());
     Ok(config)
 }

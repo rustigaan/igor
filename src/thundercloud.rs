@@ -4,7 +4,7 @@ use std::ops::Add;
 use anyhow::{anyhow, bail, Result};
 use std::path::Path;
 use ahash::{AHashMap, AHashSet};
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
@@ -33,7 +33,8 @@ pub async fn process_niche(thunder_config: ThunderConfig) -> Result<()> {
     let niche = &config.niche;
     info!("Thundercloud: {:?}: {:?}", niche.name, niche.description.as_ref().unwrap_or(&"-".to_string()));
     debug!("Use thundercloud: {:?}", thunder_config.use_thundercloud());
-    visit_subtree(RelativePath::from("."), FromBothCumulusAndInvar, &thunder_config).await?;
+    let current_directory = RelativePath::from(".");
+    visit_subtree(&current_directory, FromBothCumulusAndInvar, &thunder_config).await?;
     Ok(())
 }
 
@@ -133,6 +134,9 @@ static BOLT_REGEX_WITHOUT_DOT: Lazy<Regex> = Lazy::new(|| {
 static PLAIN_FILE_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
     Regex::new("^(?<base>.*)(?<extension>[.][^.]*)").unwrap()
 });
+static ILLEGAL_FILE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new("^([.][.]?)?$").unwrap()
+});
 
 #[derive(Clone, Copy)]
 enum Thumbs {
@@ -141,29 +145,84 @@ enum Thumbs {
     FromBothCumulusAndInvar,
 }
 
-async fn visit_subtree(directory: RelativePath, thumbs: Thumbs, thunder_config: &ThunderConfig) -> Result<()> {
-    let (bolts, cumulus_subdirectories, mut invar_subdirectories) = match thumbs {
-        FromCumulus => {
-            let in_cumulus = directory.clone().relative_to(thunder_config.cumulus());
-            let (bolts, subdirectories) = visit_directory(in_cumulus, thunder_config).await?;
-            (bolts, subdirectories, AHashSet::new())
-        },
-        FromInvar => {
-            let in_invar = directory.clone().relative_to(thunder_config.invar());
-            let (bolts, subdirectories) = visit_directory(in_invar, thunder_config).await?;
-            (bolts, AHashSet::new(), subdirectories)
-        },
-        FromBothCumulusAndInvar => {
-            let in_cumulus = directory.clone().relative_to(thunder_config.cumulus());
-            let (cumulus_bolts, cumulus_subdirectories) = visit_directory(in_cumulus, thunder_config).await?;
-            let in_invar = directory.clone().relative_to(thunder_config.invar());
-            let (invar_bolts, invar_subdirectories) = visit_directory(in_invar, thunder_config).await?;
-            (combine(cumulus_bolts, invar_bolts), cumulus_subdirectories, invar_subdirectories)
+impl Thumbs {
+    fn visit_cumulus(&self) -> bool {
+        match self {
+            FromCumulus => true,
+            FromBothCumulusAndInvar => true,
+            _ => false,
         }
-    };
-    for (key, bolt_list) in bolts {
+    }
+    fn visit_invar(&self) -> bool {
+        match self {
+            FromInvar => true,
+            FromBothCumulusAndInvar => true,
+            _ => false,
+        }
+    }
+}
+
+async fn visit_subtree(directory: &RelativePath, thumbs: Thumbs, thunder_config: &ThunderConfig) -> Result<()> {
+    let (cumulus_bolts, cumulus_subdirectories) =
+        try_visit_directory(thumbs.visit_cumulus(), ThunderConfig::cumulus, thunder_config, directory).await?;
+    let (invar_bolts, invar_subdirectories) =
+        try_visit_directory(thumbs.visit_invar(), ThunderConfig::invar, thunder_config, directory).await?;
+
+    let bolts = combine(cumulus_bolts, invar_bolts);
+    for (key, bolt_list) in &bolts {
         debug!("Bolts entry: {:?}: {:?}", key, bolt_list);
     }
+
+    generate_files(&directory, bolts, thunder_config).await?;
+
+    visit_subdirectories(directory, cumulus_subdirectories, invar_subdirectories, thunder_config).await?;
+
+    Ok(())
+}
+
+async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, Vec<Bolt>>, thunder_config: &ThunderConfig) -> Result<()> {
+    let target_directory = directory.relative_to(thunder_config.project_root());
+    debug!("Generate files in {:?}", &target_directory);
+    for (name, bolt_list) in &bolts {
+        if ILLEGAL_FILE_REGEX.is_match(name) {
+            warn!("Target filename is not legal: {name:?}");
+            continue;
+        }
+        if let Some(first_bolt) = bolt_list.iter().next() {
+            if let Bolt::Ignore(_) = first_bolt {
+                continue;
+            }
+        } else {
+            continue;
+        }
+        let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
+        let bolt_list = filter_options(bolt_list, thunder_config);
+        if bolt_list.is_empty() {
+            debug!("Skipped: {name:?}: {:?}", &target_file);
+            continue;
+        }
+        debug!("Generate: {name:?}: {bolt_list:?}: {:?}", &target_file);
+    }
+    Ok(())
+}
+
+fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> Vec<Bolt> {
+    let mut features = AHashSet::new();
+    features.insert("@");
+    for feature in thunder_config.use_thundercloud().features() {
+        features.insert(feature);
+    }
+    let mut result = Vec::new();
+    for bolt in bolt_list {
+        if features.contains(&bolt.feature_name() as &str) {
+            result.push(bolt.clone());
+        }
+    }
+    result
+}
+
+async fn visit_subdirectories(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &ThunderConfig) -> Result<()> {
+    let mut invar_subdirectories = invar_subdirectories;
     for path in cumulus_subdirectories {
         let subdirectory_thumbs = if let Some(_) = invar_subdirectories.get(&path) {
             invar_subdirectories.remove(&path);
@@ -174,13 +233,13 @@ async fn visit_subtree(directory: RelativePath, thumbs: Thumbs, thunder_config: 
         let mut subdirectory = directory.clone();
         let path: RelativePath = path.try_into()?;
         subdirectory.push(path);
-        Box::pin(visit_subtree(subdirectory, subdirectory_thumbs, thunder_config)).await?;
+        Box::pin(visit_subtree(&subdirectory, subdirectory_thumbs, thunder_config)).await?;
     }
     for path in invar_subdirectories {
         let mut subdirectory = directory.clone();
         let path: RelativePath = path.try_into()?;
         subdirectory.push(path);
-        Box::pin(visit_subtree(subdirectory, FromInvar, thunder_config)).await?;
+        Box::pin(visit_subtree(&subdirectory, FromInvar, thunder_config)).await?;
     }
     Ok(())
 }
@@ -252,11 +311,25 @@ fn combine_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>
     result
 }
 
-async fn visit_directory(directory: AbsolutePath, thunder_config: &ThunderConfig) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+async fn try_visit_directory(exists: bool, get_root: impl FnOnce(&ThunderConfig) -> &AbsolutePath, thunder_config: &ThunderConfig, directory: &RelativePath) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+    if exists {
+        let source_root = get_root(thunder_config);
+        let in_cumulus = directory.clone().relative_to(source_root);
+        visit_directory(&in_cumulus, thunder_config).await
+    } else {
+        Ok(void_subtree())
+    }
+}
+
+fn void_subtree() -> (AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>) {
+    (AHashMap::new(), AHashSet::new())
+}
+
+async fn visit_directory(directory: &AbsolutePath, thunder_config: &ThunderConfig) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
     trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", &directory, thunder_config.project_root(), thunder_config.invar());
     let mut bolts = AHashMap::new();
     let mut subdirectories = AHashSet::new();
-    let mut entries = tokio::fs::read_dir(&*directory).await
+    let mut entries = tokio::fs::read_dir(directory as &Path).await
         .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
     while let Some(entry) = entries.next_entry().await? {
         trace!("Visit entry: {entry:?}");
@@ -279,9 +352,9 @@ async fn visit_directory(directory: AbsolutePath, thunder_config: &ThunderConfig
                     } else {
                         (&*file_name, "")
                     };
-                bolt = Bolt::Option(BoltCore { base_name: base_name.to_string(), extension: extension.to_string(), feature_name: "*".to_string() })
+                bolt = Bolt::Option(BoltCore { base_name: base_name.to_string(), extension: extension.to_string(), feature_name: "@".to_string() })
             } else {
-                bolt = Bolt::Option(BoltCore { base_name: file_name.to_string(), extension: "".to_string(), feature_name: "*".to_string() })
+                bolt = Bolt::Option(BoltCore { base_name: file_name.to_string(), extension: "".to_string(), feature_name: "@".to_string() })
             }
             debug!("Bolt: {bolt:?}");
             add(&mut bolts, &bolt.target_name(), bolt);
@@ -306,23 +379,28 @@ async fn visit_directory(directory: AbsolutePath, thunder_config: &ThunderConfig
 
 fn captures_to_bolt(captures: Captures) -> Result<Bolt> {
     let extension = captures.name("extension").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
-    let feature_name = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("*".to_string());
+    let feature_name = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
     let qualifier = captures.name("qualifier").map(|m|m.as_str().to_string());
     if let (Some(base_name), Some(bolt_type)) = (captures.name("base"), captures.name("bolt_type")) {
+        let base_name = base_name.as_str().to_string();
+        let base_name = base_name.strip_prefix("dot_")
+            .map(|stripped| ".".to_string() + stripped)
+            .unwrap_or(base_name);
+        let base_name = base_name.strip_prefix("x_").unwrap_or(&base_name).to_string();
         let bolt_type = bolt_type.as_str();
         let bolt =
             if bolt_type == "option" {
-                Bolt::Option(BoltCore{base_name: base_name.as_str().to_string(),extension,feature_name})
+                Bolt::Option(BoltCore{base_name,extension,feature_name})
             } else if bolt_type == "example" {
-                Bolt::Example(BoltCore{base_name: base_name.as_str().to_string(),extension,feature_name})
+                Bolt::Example(BoltCore{base_name,extension,feature_name})
             } else if bolt_type == "overwrite" {
-                Bolt::Overwrite(BoltCore{base_name: base_name.as_str().to_string(),extension,feature_name})
+                Bolt::Overwrite(BoltCore{base_name,extension,feature_name})
             } else if bolt_type == "fragment" {
-                Bolt::Fragment { bolt_core: BoltCore { base_name: base_name.as_str().to_string(), extension, feature_name }, qualifier }
+                Bolt::Fragment { bolt_core: BoltCore { base_name, extension, feature_name }, qualifier }
             } else if bolt_type == "ignore" {
-                Bolt::Ignore(BoltCore{base_name: base_name.as_str().to_string(),extension,feature_name})
+                Bolt::Ignore(BoltCore{base_name,extension,feature_name})
             } else {
-                Bolt::Unknown { bolt_core: BoltCore{base_name: base_name.as_str().to_string(), extension, feature_name }, qualifier }
+                Bolt::Unknown { bolt_core: BoltCore{base_name, extension, feature_name }, qualifier }
             };
         Ok(bolt)
     } else {

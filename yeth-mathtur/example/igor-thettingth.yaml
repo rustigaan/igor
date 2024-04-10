@@ -2,7 +2,9 @@
 use-thundercloud:
   directory: "{{PROJECT}}/example-thundercloud"
   on-incoming: Update
-  options:
+  features:
     - glass
+    - bash_config
+    - kermie
   params:
     buyer: Myra LeJean

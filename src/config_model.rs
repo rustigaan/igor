@@ -75,7 +75,7 @@ pub struct UseThundercloudConfig {
     git_remote: Option<GitRemoteConfig>,
     #[serde(rename = "on-incoming")]
     on_incoming: Option<OnIncoming>,
-    options: Option<Vec<String>>,
+    features: Option<Vec<String>>,
     params: Option<Mapping>,
 }
 
@@ -92,8 +92,8 @@ impl UseThundercloudConfig {
     pub fn on_incoming(&self) -> &OnIncoming {
         &self.on_incoming.as_ref().unwrap_or(&UPDATE)
     }
-    pub fn options(&self) -> &[String] {
-        &self.options.as_deref().unwrap_or(&EMPTY_VEC)
+    pub fn features(&self) -> &[String] {
+        &self.features.as_deref().unwrap_or(&EMPTY_VEC)
     }
 
     pub fn params(&self) -> AHashMap<String,String> {
