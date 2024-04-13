@@ -2,3 +2,6 @@
 niche:
   name: example
   description: Example thundercloud for demonstration purposes
+invar-defaults:
+  write-mode: Overwrite
+  interpolate: true

@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use ahash::AHashMap;
+use log::debug;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
@@ -114,7 +116,6 @@ fn to_strings(entry: (&Value, &Value)) -> Option<(String, String)> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize,Debug,Clone)]
 pub struct GitRemoteConfig {
     #[serde(rename = "fetch-url")]
@@ -122,4 +123,76 @@ pub struct GitRemoteConfig {
     revision: String,
     #[serde(rename = "on-incoming")]
     on_incoming: Option<OnIncoming>,
+}
+
+#[derive(Deserialize,Debug,Clone,Copy,Eq, PartialEq)]
+pub enum WriteMode {
+    Overwrite,
+    WriteNew,
+    Ignore
+}
+
+#[derive(Deserialize,Debug,Clone)]
+pub struct InvarConfig {
+    #[serde(rename = "write-mode")]
+    write_mode: Option<WriteMode>,
+    interpolate: Option<bool>,
+}
+
+impl InvarConfig {
+    pub fn new() -> InvarConfig {
+        InvarConfig { write_mode: None, interpolate: None }
+    }
+
+    pub fn with_invar_config(&self, invar_config: &InvarConfig) -> Cow<InvarConfig> {
+        let dirty = false;
+        let (write_mode, dirty) = merge_property(self.write_mode, invar_config.write_mode, dirty);
+        debug!("Write mode: {:?} -> {:?} ({:?})", self.write_mode, &write_mode, dirty);
+        let (interpolate, dirty) = merge_property(self.interpolate, invar_config.interpolate, dirty);
+        debug!("Interpolate: {:?} -> {:?} ({:?})", self.interpolate, &interpolate, dirty);
+        if dirty {
+            Cow::Owned(InvarConfig { write_mode, interpolate })
+        } else {
+            Cow::Borrowed(self)
+        }
+    }
+
+    pub fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<InvarConfig> {
+        let invar_config = InvarConfig { write_mode, interpolate: None };
+        self.with_invar_config(&invar_config)
+    }
+
+    pub fn with_write_mode(&self, write_mode: WriteMode) -> Cow<InvarConfig> {
+        self.with_write_mode_option(Some(write_mode))
+    }
+
+    pub fn write_mode(&self) -> WriteMode {
+        self.write_mode.unwrap_or(WriteMode::Overwrite)
+    }
+
+    pub fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<InvarConfig> {
+        let invar_config = InvarConfig { write_mode: None, interpolate };
+        self.with_invar_config(&invar_config)
+    }
+
+    pub fn with_interpolate(&self, interpolate: bool) -> Cow<InvarConfig> {
+        self.with_interpolate_option(Some(interpolate))
+    }
+
+    pub fn interpolate(&self) -> bool {
+        self.interpolate.unwrap_or(true)
+    }
+}
+
+fn merge_property<T: Copy + Eq>(current_value_option: Option<T>, new_value_option: Option<T>, dirty: bool) -> (Option<T>, bool) {
+    match (current_value_option, new_value_option) {
+        (Some(current_value), Some(new_value)) =>
+            if new_value == current_value {
+                (current_value_option, dirty)
+            } else {
+                (new_value_option, true)
+            },
+        (None, Some(_)) => (new_value_option, true),
+        (_, _) => (current_value_option, dirty)
+    }
 }
