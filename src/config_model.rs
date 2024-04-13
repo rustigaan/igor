@@ -116,6 +116,7 @@ fn to_strings(entry: (&Value, &Value)) -> Option<(String, String)> {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize,Debug,Clone)]
 pub struct GitRemoteConfig {
     #[serde(rename = "fetch-url")]
@@ -139,6 +140,7 @@ pub struct InvarConfig {
     interpolate: Option<bool>,
 }
 
+#[allow(dead_code)]
 impl InvarConfig {
     pub fn new() -> InvarConfig {
         InvarConfig { write_mode: None, interpolate: None }

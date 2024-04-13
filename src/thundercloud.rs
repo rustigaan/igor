@@ -72,9 +72,6 @@ enum Bolt {
         qualifier: Option<String>
     },
     Config(BoltCore),
-    Example(BoltCore),
-    Overwrite(BoltCore),
-    Ignore(BoltCore),
     Unknown {
         bolt_core: BoltCore,
         qualifier: Option<String>
@@ -98,9 +95,6 @@ impl BoltExt for Bolt {
             Bolt::Option(bolt_core) => bolt_core,
             Bolt::Config(bolt_core) => bolt_core,
             Bolt::Fragment { bolt_core, .. } => bolt_core,
-            Bolt::Example(bolt_core) => bolt_core,
-            Bolt::Overwrite(bolt_core) => bolt_core,
-            Bolt::Ignore(bolt_core) => bolt_core,
             Bolt::Unknown { bolt_core, .. } => bolt_core,
         }
     }
@@ -109,9 +103,6 @@ impl BoltExt for Bolt {
             Bolt::Option(_) => "option",
             Bolt::Config(_) => " config",
             Bolt::Fragment { .. } => "fragment",
-            Bolt::Example(_) => "example",
-            Bolt::Overwrite(_) => "overwrite",
-            Bolt::Ignore(_) => "ignore",
             Bolt::Unknown { .. } => "unknown",
         }
     }
@@ -213,21 +204,19 @@ async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, Vec<Bo
             warn!("Target filename is not legal: {name:?}");
             continue;
         }
-        if let Some(first_bolt) = bolt_list.iter().next() {
-            if let Bolt::Ignore(_) = first_bolt {
-                continue;
-            }
-        } else {
-            continue;
-        }
         let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
         let bolt_list = filter_options(bolt_list, thunder_config);
         if bolt_list.is_empty() {
             debug!("Skipped: {name:?}: {:?}", &target_file);
             continue;
         }
-        debug!("Generate: {name:?}: {bolt_list:?}: {:?}", &target_file);
+        generate_file(&target_file, &bolt_list, use_config.as_ref()).await?;
     }
+    Ok(())
+}
+
+async fn generate_file(target_file: &AbsolutePath, bolts: &Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+    debug!("Generate: {:?}: {:?}: {:?}", target_file, bolts, invar_config);
     Ok(())
 }
 
@@ -298,13 +287,6 @@ fn combine(cumulus_bolts: AHashMap<String,Vec<Bolt>>, invar_bolts: AHashMap<Stri
 
 fn combine_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>) -> Vec<Bolt> {
     let mut result = invar_bolts_list;
-    for bolt in &result {
-        if let Bolt::Ignore(_) = bolt {
-            let mut ignore_result = Vec::new();
-            ignore_result.push(bolt.to_owned());
-            return ignore_result;
-        }
-    }
     for cumulus_bolt in &cumulus_bolts_list {
         let mut add_bolt = Some(Cow::Borrowed(cumulus_bolt));
         for invar_bolt in &result {
@@ -314,32 +296,15 @@ fn combine_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>
             if cumulus_bolt.qualifier() != invar_bolt.qualifier() {
                 continue;
             }
-            match (cumulus_bolt, invar_bolt) {
-                (Bolt::Example(bolt_core), Bolt::Overwrite(_)) => {
-                    add_bolt = Some(Cow::Owned(Bolt::Option(bolt_core.clone())))
-                },
-                (Bolt::Fragment { .. }, Bolt::Fragment { .. }) => {
+            if let (Bolt::Fragment { .. }, Bolt::Fragment { .. }) = (cumulus_bolt, invar_bolt) {
                     add_bolt = None;
-                }
-                (_, Bolt::Ignore(_)) => {
-                    let mut ignore_result = Vec::new();
-                    ignore_result.push(invar_bolt.to_owned());
-                    return ignore_result;
-                }
-                (_, _) => ()
             }
             if add_bolt.is_none() {
                 break;
             }
         }
         if let Some(add_bolt) = add_bolt {
-            match add_bolt {
-                Cow::Owned(Bolt::Option(_)) => {
-                    result = result.iter().filter(|item| if let Bolt::Overwrite(_) = item { false } else { true }).map(ToOwned::to_owned).collect();
-                    result.insert(0, add_bolt.into_owned())
-                },
-                add_bolt => result.push(add_bolt.into_owned()),
-            }
+            result.push(add_bolt.into_owned());
         }
     }
     result
@@ -444,12 +409,6 @@ fn captures_to_bolt(captures: Captures, source: AbsolutePath) -> Result<Bolt> {
                 create_config(base_name_orig.as_str(), &base_name, &extension, &feature_name, source)
             } else if bolt_type == "fragment" {
                 Bolt::Fragment { bolt_core: BoltCore { base_name, extension, feature_name, source }, qualifier }
-            } else if bolt_type == "example" {
-                Bolt::Example(BoltCore{base_name,extension,feature_name,source})
-            } else if bolt_type == "overwrite" {
-                Bolt::Overwrite(BoltCore{base_name,extension,feature_name,source})
-            } else if bolt_type == "ignore" {
-                Bolt::Ignore(BoltCore{base_name,extension,feature_name,source})
             } else {
                 Bolt::Unknown { bolt_core: BoltCore{base_name, extension, feature_name, source }, qualifier }
             };
