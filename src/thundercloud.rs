@@ -190,14 +190,7 @@ async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<B
     let target_directory = directory.relative_to(thunder_config.project_root());
     let mut use_config = Cow::Borrowed(invar_config);
     if let Some(dir_bolts) = bolts.get(".") {
-        for bolt in dir_bolts.0.iter().chain(dir_bolts.1.iter()) {
-            if let Bolt::Config(_) = bolt {
-                let subtree_invar_config = get_invar_config(bolt.source()).await?;
-                debug!("Apply directory configuration: {:?} to {:?}", &subtree_invar_config, invar_config);
-                let new_use_config = use_config.to_owned().with_invar_config(&subtree_invar_config).into_owned();
-                use_config = Cow::Owned(new_use_config);
-            }
-        }
+        use_config = update_invar_config(invar_config, &dir_bolts.0, &dir_bolts.1).await?;
     }
     debug!("Generate files in {:?} with config {:?}", &target_directory, &use_config);
     for (name, bolt_lists) in &bolts {
@@ -218,9 +211,23 @@ async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<B
 }
 
 async fn generate_file(target_file: &AbsolutePath, cumulus_bolts: Vec<Bolt>, invar_bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+    let use_config = update_invar_config(invar_config, &cumulus_bolts, &invar_bolts).await?;
     let bolts = combine_bolt_lists(cumulus_bolts, invar_bolts);
-    debug!("Generate: {:?}: {:?}: {:?}", target_file, &bolts, invar_config);
+    debug!("Generate: {:?}: {:?}: {:?}", target_file, &bolts, &use_config);
     Ok(())
+}
+
+async fn update_invar_config<'a>(invar_config: &'a InvarConfig, cumulus_bolts: &Vec<Bolt>, invar_bolts: &Vec<Bolt>) -> Result<Cow<'a,InvarConfig>> {
+    let mut use_config = Cow::Borrowed(invar_config);
+    for bolt in cumulus_bolts.iter().chain(invar_bolts.iter()) {
+        if let Bolt::Config(_) = bolt {
+            let bolt_invar_config = get_invar_config(bolt.source()).await?;
+            debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
+            let new_use_config = use_config.to_owned().with_invar_config(&bolt_invar_config).into_owned();
+            use_config = Cow::Owned(new_use_config);
+        }
+    }
+    Ok(use_config)
 }
 
 async fn get_invar_config(source: &AbsolutePath) -> Result<InvarConfig> {
