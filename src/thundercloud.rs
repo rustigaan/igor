@@ -175,8 +175,8 @@ async fn visit_subtree(directory: &RelativePath, thumbs: Thumbs, thunder_config:
         try_visit_directory(thumbs.visit_invar(), ThunderConfig::invar, thunder_config, directory).await?;
 
     let bolts = combine(cumulus_bolts, invar_bolts);
-    for (key, bolt_list) in &bolts {
-        debug!("Bolts entry: {:?}: {:?}", key, bolt_list);
+    for (key, bolt_lists) in &bolts {
+        debug!("Bolts entry: {:?}: {:?}", key, bolt_lists);
     }
 
     generate_files(&directory, bolts, thunder_config, invar_config).await?;
@@ -186,37 +186,40 @@ async fn visit_subtree(directory: &RelativePath, thumbs: Thumbs, thunder_config:
     Ok(())
 }
 
-async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, Vec<Bolt>>, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
+async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>,Vec<Bolt>)>, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
     let target_directory = directory.relative_to(thunder_config.project_root());
     let mut use_config = Cow::Borrowed(invar_config);
     if let Some(dir_bolts) = bolts.get(".") {
-        for bolt in dir_bolts {
+        for bolt in dir_bolts.0.iter().chain(dir_bolts.1.iter()) {
             if let Bolt::Config(_) = bolt {
                 let subtree_invar_config = get_invar_config(bolt.source()).await?;
                 debug!("Apply directory configuration: {:?} to {:?}", &subtree_invar_config, invar_config);
-                use_config = invar_config.with_invar_config(&subtree_invar_config);
+                let new_use_config = use_config.to_owned().with_invar_config(&subtree_invar_config).into_owned();
+                use_config = Cow::Owned(new_use_config);
             }
         }
     }
     debug!("Generate files in {:?} with config {:?}", &target_directory, &use_config);
-    for (name, bolt_list) in &bolts {
+    for (name, bolt_lists) in &bolts {
         if ILLEGAL_FILE_REGEX.is_match(name) {
             warn!("Target filename is not legal: {name:?}");
             continue;
         }
         let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
-        let bolt_list = filter_options(bolt_list, thunder_config);
-        if bolt_list.is_empty() {
+        let cumulus_bolts = filter_options(&bolt_lists.0, thunder_config);
+        let invar_bolts = filter_options(&bolt_lists.1, thunder_config);
+        if cumulus_bolts.is_empty() && invar_bolts.is_empty() {
             debug!("Skipped: {name:?}: {:?}", &target_file);
             continue;
         }
-        generate_file(&target_file, &bolt_list, use_config.as_ref()).await?;
+        generate_file(&target_file, cumulus_bolts, invar_bolts, use_config.as_ref()).await?;
     }
     Ok(())
 }
 
-async fn generate_file(target_file: &AbsolutePath, bolts: &Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
-    debug!("Generate: {:?}: {:?}: {:?}", target_file, bolts, invar_config);
+async fn generate_file(target_file: &AbsolutePath, cumulus_bolts: Vec<Bolt>, invar_bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+    let bolts = combine_bolt_lists(cumulus_bolts, invar_bolts);
+    debug!("Generate: {:?}: {:?}: {:?}", target_file, &bolts, invar_config);
     Ok(())
 }
 
@@ -267,22 +270,19 @@ async fn visit_subdirectories(directory: &RelativePath, cumulus_subdirectories: 
     Ok(())
 }
 
-fn combine(cumulus_bolts: AHashMap<String,Vec<Bolt>>, invar_bolts: AHashMap<String,Vec<Bolt>>) -> AHashMap<String,Vec<Bolt>> {
-    let mut result = AHashMap::new();
-    let mut cumulus_bolts = cumulus_bolts;
-    let cumulus_bolts_ref = &mut cumulus_bolts;
-    for (key, invar_bolt_list) in invar_bolts {
-        let bolt_list = if let Some(cumulus_bolt_list) = cumulus_bolts_ref.remove(&key) {
-            combine_bolt_lists(cumulus_bolt_list, invar_bolt_list)
-        } else {
-            invar_bolt_list
-        };
-        result.insert(key, bolt_list);
-    }
-    for (key, invar_bolt_list) in cumulus_bolts_ref {
-        result.insert(key.clone(), invar_bolt_list.clone());
-    }
-    result
+fn combine(cumulus_bolts: AHashMap<String,Vec<Bolt>>, invar_bolts: AHashMap<String,Vec<Bolt>>) -> AHashMap<String,(Vec<Bolt>,Vec<Bolt>)> {
+    let cumulus_keys: AHashSet<String> = cumulus_bolts.iter().map(|(k,_)| k).map(ToOwned::to_owned).collect();
+    let invar_keys: AHashSet<String> = invar_bolts.iter().map(|(k,_)| k).map(ToOwned::to_owned).collect();
+    let keys = cumulus_keys.union(&invar_keys);
+    keys.map(
+        |k: &String|
+            (k.to_owned(),
+                (
+                    cumulus_bolts.get(k).map(ToOwned::to_owned).unwrap_or_else(Vec::new),
+                    invar_bolts.get(k).map(ToOwned::to_owned).unwrap_or_else(Vec::new)
+                )
+            )
+    ).collect()
 }
 
 fn combine_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>) -> Vec<Bolt> {
