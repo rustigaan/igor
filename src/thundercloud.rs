@@ -9,6 +9,7 @@ use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
 use crate::config_model::{InvarConfig, ThunderConfig};
+use crate::config_model::WriteMode::Ignore;
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 
@@ -187,11 +188,15 @@ async fn visit_subtree(directory: &RelativePath, thumbs: Thumbs, thunder_config:
 }
 
 async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>,Vec<Bolt>)>, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
-    let target_directory = directory.relative_to(thunder_config.project_root());
+    let mut bolts = bolts;
     let mut use_config = Cow::Borrowed(invar_config);
-    if let Some(dir_bolts) = bolts.get(".") {
-        use_config = update_invar_config(invar_config, &dir_bolts.0, &dir_bolts.1).await?;
+    if let Some(dir_bolts) = bolts.remove(".") {
+        let dir_bolt_list = combine_and_filter_bolt_lists(dir_bolts.0, dir_bolts.1, thunder_config);
+        use_config = update_invar_config(invar_config, &dir_bolt_list).await?;
     }
+    let bolts = bolts;
+
+    let target_directory = directory.relative_to(thunder_config.project_root());
     debug!("Generate files in {:?} with config {:?}", &target_directory, &use_config);
     for (name, bolt_lists) in &bolts {
         if ILLEGAL_FILE_REGEX.is_match(name) {
@@ -201,25 +206,29 @@ async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<B
         let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
         let cumulus_bolts = filter_options(&bolt_lists.0, thunder_config);
         let invar_bolts = filter_options(&bolt_lists.1, thunder_config);
-        if cumulus_bolts.is_empty() && invar_bolts.is_empty() {
-            debug!("Skipped: {name:?}: {:?}", &target_file);
-            continue;
-        }
-        generate_file(&target_file, cumulus_bolts, invar_bolts, use_config.as_ref()).await?;
+        let bolts = combine_and_filter_bolt_lists(cumulus_bolts, invar_bolts, thunder_config);
+        generate_file(&target_file, bolts, use_config.as_ref()).await?;
     }
     Ok(())
 }
 
-async fn generate_file(target_file: &AbsolutePath, cumulus_bolts: Vec<Bolt>, invar_bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
-    let use_config = update_invar_config(invar_config, &cumulus_bolts, &invar_bolts).await?;
-    let bolts = combine_bolt_lists(cumulus_bolts, invar_bolts);
+async fn generate_file(target_file: &AbsolutePath, bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+    if bolts.is_empty() {
+        debug!("Skip: {:?}: {:?}", target_file, &bolts);
+        return Ok(())
+    }
+    let use_config = update_invar_config(invar_config, &bolts).await?;
+    if use_config.write_mode() == Ignore {
+        debug!("Ignore: {:?}: {:?}: {:?}", target_file, &bolts, &use_config);
+        return Ok(())
+    }
     debug!("Generate: {:?}: {:?}: {:?}", target_file, &bolts, &use_config);
     Ok(())
 }
 
-async fn update_invar_config<'a>(invar_config: &'a InvarConfig, cumulus_bolts: &Vec<Bolt>, invar_bolts: &Vec<Bolt>) -> Result<Cow<'a,InvarConfig>> {
+async fn update_invar_config<'a>(invar_config: &'a InvarConfig, bolts: &Vec<Bolt>) -> Result<Cow<'a,InvarConfig>> {
     let mut use_config = Cow::Borrowed(invar_config);
-    for bolt in cumulus_bolts.iter().chain(invar_bolts.iter()) {
+    for bolt in bolts {
         if let Bolt::Config(_) = bolt {
             let bolt_invar_config = get_invar_config(bolt.source()).await?;
             debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
@@ -237,6 +246,11 @@ async fn get_invar_config(source: &AbsolutePath) -> Result<InvarConfig> {
     let config = serde_yaml::from_reader(file)?;
     debug!("Invar configuration: {config:?}");
     Ok(config)
+}
+
+fn combine_and_filter_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>, thunder_config: &ThunderConfig) -> Vec<Bolt> {
+    let combined = combine_bolt_lists(cumulus_bolts_list, invar_bolts_list);
+    filter_options(&combined, thunder_config)
 }
 
 fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> Vec<Bolt> {
