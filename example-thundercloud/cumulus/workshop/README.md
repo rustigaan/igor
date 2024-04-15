@@ -2,4 +2,4 @@
 
 Intro.
 
-[//]: <#> "==== FRAGMENT details ===="
+[//]: <#> "==== FRAGMENT @-details ===="

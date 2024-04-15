@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::hash::Hash;
+use std::io::ErrorKind;
 use std::ops::Add;
 use anyhow::{anyhow, bail, Result};
 use std::path::Path;
@@ -8,8 +9,10 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
-use crate::config_model::{InvarConfig, ThunderConfig};
-use crate::config_model::WriteMode::Ignore;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::fs::{DirBuilder, File, OpenOptions};
+use tokio::sync::mpsc::{channel, Sender, Receiver};
+use crate::config_model::{InvarConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 
@@ -204,25 +207,94 @@ async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<B
             continue;
         }
         let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
+        let half_config = update_invar_config(invar_config, &bolt_lists.0).await?;
+        let whole_config = update_invar_config(half_config.as_ref(), &bolt_lists.1).await?;
         let cumulus_bolts = filter_options(&bolt_lists.0, thunder_config);
         let invar_bolts = filter_options(&bolt_lists.1, thunder_config);
         let bolts = combine_and_filter_bolt_lists(cumulus_bolts, invar_bolts, thunder_config);
-        generate_file(&target_file, bolts, use_config.as_ref()).await?;
+        generate_file(&target_file, bolts, whole_config.as_ref()).await?;
     }
     Ok(())
 }
 
-async fn generate_file(target_file: &AbsolutePath, bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+async fn generate_file(target_file: &AbsolutePath, mut bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
     if bolts.is_empty() {
         debug!("Skip: {:?}: {:?}", target_file, &bolts);
         return Ok(())
     }
-    let use_config = update_invar_config(invar_config, &bolts).await?;
-    if use_config.write_mode() == Ignore {
-        debug!("Ignore: {:?}: {:?}: {:?}", target_file, &bolts, &use_config);
+    let first_bolt = bolts.remove(0);
+    let option =
+        if let Bolt::Option(_) = first_bolt {
+            first_bolt
+        } else {
+            debug!("Skip (only fragments): {:?}: {:?}", target_file, &bolts);
+            return Ok(())
+        }
+    ;
+    if invar_config.write_mode() == WriteMode::Ignore {
+        debug!("Ignore: {:?}: {:?}: {:?}", target_file, &bolts, &invar_config);
         return Ok(())
     }
-    debug!("Generate: {:?}: {:?}: {:?}", target_file, &bolts, &use_config);
+    if let Some(target) = open_target(target_file.to_owned(), invar_config).await? {
+        debug!("Generate: {:?}: {:?}: {:?}", target_file, &bolts, &invar_config);
+        let (tx, rx) = channel(10);
+        let join_handle = tokio::task::spawn(file_writer(rx, target));
+        generate_option(option, bolts, invar_config, &tx).await?;
+        drop(tx);
+        join_handle.await??;
+    } else {
+        debug!("Skip (target exists): {:?}: {:?}: {:?}", target_file, &bolts, &invar_config);
+    }
+    Ok(())
+}
+
+async fn generate_option(option: Bolt, fragments: Vec<Bolt>, invar_config: &InvarConfig, tx: &Sender<String>) -> Result<()> {
+    debug!("Generating option: {:?}: {:?}: {:?}", &option, &fragments, invar_config);
+    let source = option.source();
+    let file = File::open(source.as_path()).await?;
+    let buffered_reader = BufReader::new(file);
+    let mut lines = buffered_reader.lines();
+    while let Some(mut line) = lines.next_line().await? {
+        line.push('\n');
+        tx.send(line).await?;
+    }
+    Ok(())
+}
+
+async fn open_target(target_file: AbsolutePath, invar_config: &InvarConfig) -> Result<Option<File>> {
+    let mut open_options = OpenOptions::new().read(false).write(true).to_owned();
+    let open_options = match invar_config.write_mode() {
+        WriteMode::Ignore => {
+            return Ok(None)
+        },
+        WriteMode::WriteNew => open_options.create_new(true),
+        WriteMode::Overwrite => open_options.create(true),
+    };
+
+    let mut target_dir = target_file.to_path_buf();
+    target_dir.pop();
+    let mut dir_builder = DirBuilder::new();
+    dir_builder.recursive(true);
+    dir_builder.create(target_dir.as_path()).await?;
+
+    let result = open_options.open(target_file.as_path()).await;
+    match result {
+        Ok(file) => Ok(Some(file)),
+        Err(error) => {
+            if let ErrorKind::AlreadyExists = error.kind() {
+                Ok(None)
+            } else {
+                Err(error.into())
+            }
+        }
+    }
+}
+
+async fn file_writer(rx: Receiver<String>, mut target: File) -> Result<()> {
+    let mut rx = rx;
+    while let Some(line) = rx.recv().await {
+        target.write_all(line.as_bytes()).await?;
+    }
     Ok(())
 }
 
