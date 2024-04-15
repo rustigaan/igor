@@ -259,13 +259,23 @@ fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> Vec<
     for feature in thunder_config.use_thundercloud().features() {
         features.insert(feature);
     }
-    let mut result = Vec::new();
+    let mut options = Vec::new();
+    let mut fragments = Vec::new();
     for bolt in bolt_list {
         if features.contains(&bolt.feature_name() as &str) {
-            result.push(bolt.clone());
+            if let Bolt::Option(_) = bolt {
+                options.push(bolt.clone());
+            } else if let Bolt::Fragment { .. } = bolt {
+                fragments.push(bolt.clone())
+            }
         }
     }
-    result
+    let mut bolts = fragments;
+    if !options.is_empty() {
+        let first_option = options.remove(0);
+        bolts.insert(0, first_option);
+    }
+    bolts
 }
 
 async fn visit_subdirectories(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
