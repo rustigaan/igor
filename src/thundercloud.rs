@@ -82,18 +82,7 @@ enum Bolt {
     },
 }
 
-trait BoltExt {
-    fn bolt_core(&self) -> &BoltCore;
-    fn kind_name(&self) -> &'static str;
-    fn base_name(&self) -> String;
-    fn extension(&self) -> String;
-    fn target_name(&self) -> String;
-    fn feature_name(&self) -> String;
-    fn source(&self) -> &AbsolutePath;
-    fn qualifier(&self) -> Option<String>;
-}
-
-impl BoltExt for Bolt {
+impl Bolt {
     fn bolt_core(&self) -> &BoltCore {
         match self {
             Bolt::Option(bolt_core) => bolt_core,
@@ -146,6 +135,10 @@ static PLAIN_FILE_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
 });
 static ILLEGAL_FILE_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new("^([.][.]?)?$").unwrap()
+});
+
+static FRAGMENT_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new("==== (?<bracket>(BEGIN|END) )?FRAGMENT (?<feature>[a-z0-9_]+|@)(-(?<qualifier>[a-z0-9_]+))? ====").unwrap()
 });
 
 #[derive(Clone, Copy)]
@@ -252,6 +245,9 @@ async fn generate_option(option: Bolt, fragments: Vec<Bolt>, invar_config: &Inva
     let buffered_reader = BufReader::new(file);
     let mut lines = buffered_reader.lines();
     while let Some(mut line) = lines.next_line().await? {
+        if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
+            debug!("Found fragment: {:?}", &captures);
+        }
         line.push('\n');
         tx.send(line).await?;
     }
@@ -398,8 +394,8 @@ fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bol
             if invar_fragments.contains(&(cumulus_bolt.feature_name(), cumulus_bolt.qualifier())) {
                 continue;
             }
-            result.push(cumulus_bolt.clone());
         }
+        result.push(cumulus_bolt.clone());
     }
     result
 }
