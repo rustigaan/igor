@@ -194,7 +194,7 @@ async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<B
     let mut bolts = bolts;
     let mut use_config = Cow::Borrowed(invar_config);
     if let Some(dir_bolts) = bolts.remove(".") {
-        let dir_bolt_list = combine_and_filter_bolt_lists(dir_bolts.0, dir_bolts.1, thunder_config);
+        let (_, dir_bolt_list) = combine_and_filter_bolt_lists(&dir_bolts.0, &dir_bolts.1, thunder_config);
         use_config = update_invar_config(invar_config, &dir_bolt_list).await?;
     }
     let bolts = bolts;
@@ -209,23 +209,20 @@ async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<B
         let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
         let half_config = update_invar_config(invar_config, &bolt_lists.0).await?;
         let whole_config = update_invar_config(half_config.as_ref(), &bolt_lists.1).await?;
-        let cumulus_bolts = filter_options(&bolt_lists.0, thunder_config);
-        let invar_bolts = filter_options(&bolt_lists.1, thunder_config);
-        let bolts = combine_and_filter_bolt_lists(cumulus_bolts, invar_bolts, thunder_config);
-        generate_file(&target_file, bolts, whole_config.as_ref()).await?;
+        let (option, bolts) = combine_and_filter_bolt_lists(&bolt_lists.0, &bolt_lists.1, thunder_config);
+        generate_file(&target_file, option, bolts, whole_config.as_ref()).await?;
     }
     Ok(())
 }
 
-async fn generate_file(target_file: &AbsolutePath, mut bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+async fn generate_file(target_file: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
     if bolts.is_empty() {
         debug!("Skip: {:?}: {:?}", target_file, &bolts);
         return Ok(())
     }
-    let first_bolt = bolts.remove(0);
     let option =
-        if let Bolt::Option(_) = first_bolt {
-            first_bolt
+        if let Some(option) = option {
+            option
         } else {
             debug!("Skip (only fragments): {:?}: {:?}", target_file, &bolts);
             return Ok(())
@@ -320,12 +317,12 @@ async fn get_invar_config(source: &AbsolutePath) -> Result<InvarConfig> {
     Ok(config)
 }
 
-fn combine_and_filter_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>, thunder_config: &ThunderConfig) -> Vec<Bolt> {
+fn combine_and_filter_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> (Option<Bolt>, Vec<Bolt>) {
     let combined = combine_bolt_lists(cumulus_bolts_list, invar_bolts_list);
     filter_options(&combined, thunder_config)
 }
 
-fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> Vec<Bolt> {
+fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> (Option<Bolt>, Vec<Bolt>) {
     let mut features = AHashSet::new();
     features.insert("@");
     for feature in thunder_config.use_thundercloud().features() {
@@ -342,12 +339,12 @@ fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> Vec<
             }
         }
     }
-    let mut bolts = fragments;
-    if !options.is_empty() {
-        let first_option = options.remove(0);
-        bolts.insert(0, first_option);
-    }
-    bolts
+    let first_option = if options.is_empty() {
+        None
+    } else {
+        Some(options.remove(0))
+    };
+    (first_option, fragments)
 }
 
 async fn visit_subdirectories(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
@@ -388,26 +385,20 @@ fn combine(cumulus_bolts: AHashMap<String,Vec<Bolt>>, invar_bolts: AHashMap<Stri
     ).collect()
 }
 
-fn combine_bolt_lists(cumulus_bolts_list: Vec<Bolt>, invar_bolts_list: Vec<Bolt>) -> Vec<Bolt> {
-    let mut result = invar_bolts_list;
-    for cumulus_bolt in &cumulus_bolts_list {
-        let mut add_bolt = Some(Cow::Borrowed(cumulus_bolt));
-        for invar_bolt in &result {
-            if cumulus_bolt.feature_name() != invar_bolt.feature_name() {
-                continue;
-            }
-            if cumulus_bolt.qualifier() != invar_bolt.qualifier() {
-                continue;
-            }
-            if let (Bolt::Fragment { .. }, Bolt::Fragment { .. }) = (cumulus_bolt, invar_bolt) {
-                    add_bolt = None;
-            }
-            if add_bolt.is_none() {
-                break;
-            }
+fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>) -> Vec<Bolt> {
+    let mut result = invar_bolts_list.clone();
+    let mut invar_fragments = AHashSet::new();
+    for invar_bolt in invar_bolts_list {
+        if let Bolt::Fragment { .. } = invar_bolt {
+            invar_fragments.insert((invar_bolt.feature_name(), invar_bolt.qualifier()));
         }
-        if let Some(add_bolt) = add_bolt {
-            result.push(add_bolt.into_owned());
+    }
+    for cumulus_bolt in cumulus_bolts_list {
+        if let Bolt::Fragment { .. } = cumulus_bolt {
+            if invar_fragments.contains(&(cumulus_bolt.feature_name(), cumulus_bolt.qualifier())) {
+                continue;
+            }
+            result.push(cumulus_bolt.clone());
         }
     }
     result
