@@ -1,5 +1,9 @@
+# ==== BEGIN FRAGMENT glass-spring ====
 ---
 spring:
   material: glass
   delicate: true
   number-of-coils: 17
+raising:
+  - "expectations"
+# ==== END FRAGMENT glass-spring ====

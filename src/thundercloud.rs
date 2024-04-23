@@ -9,7 +9,7 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::fs::{DirBuilder, File, OpenOptions};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
 use crate::config_model::{InvarConfig, ThunderConfig, WriteMode};
@@ -246,12 +246,105 @@ async fn generate_option(option: Bolt, fragments: Vec<Bolt>, invar_config: &Inva
     let mut lines = buffered_reader.lines();
     while let Some(mut line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
-            debug!("Found fragment: {:?}", &captures);
+            let feature = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
+            let qualifier = captures.name("qualifier").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
+            debug!("Found fragment: {:?}: {:?}", &feature, &qualifier);
+            if let Some(bracket) = captures.name("bracket") {
+                if bracket.as_str() == "BEGIN " {
+                    skip_to_end_of_fragment(&mut lines, &feature, &qualifier).await?;
+                }
+            }
+            find_and_include_fragment(&feature, &qualifier, tx, &fragments, invar_config).await?;
+            continue;
         }
         line.push('\n');
         tx.send(line).await?;
     }
     Ok(())
+}
+
+async fn skip_to_end_of_fragment<T>(lines: &mut Lines<T>, feature: &str, qualifier: &str) -> Result<()>
+where T: AsyncBufRead + Unpin {
+    while let Some(fragment_line) = lines.next_line().await? {
+        if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
+            debug!("Found inner fragment: {:?}", &captures);
+            if is_matching_end(captures, feature, qualifier) {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn find_and_include_fragment(feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+    for bolt in fragments {
+        if let Bolt::Fragment { bolt_core, qualifier: fragment_qualifier, .. } = bolt {
+            let fragment_qualifier = fragment_qualifier.as_ref().map(ToOwned::to_owned).unwrap_or("".to_string());
+            if bolt_core.feature_name == feature && fragment_qualifier == qualifier {
+                debug!("Found fragment to include: {:?}", bolt);
+                include_fragment(bolt, feature, qualifier, tx, invar_config).await?;
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn include_fragment(fragment: &Bolt, feature: &str, qualifier: &str, tx: &Sender<String>, _invar_config: &InvarConfig) -> Result<()> {
+    let source = fragment.source();
+    let file = File::open(source.as_path()).await?;
+    let buffered_reader = BufReader::new(file);
+    let mut lines = buffered_reader.lines();
+    while let Some(mut line) = lines.next_line().await? {
+        if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
+            let placeholder_feature = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
+            let placeholder_qualifier = captures.name("qualifier").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
+            debug!("Found placeholder: {:?}: {:?}", &feature, &qualifier);
+            if let Some(bracket) = captures.name("bracket") {
+                if bracket.as_str() == "BEGIN " && placeholder_feature == feature && placeholder_qualifier == qualifier {
+                    line.push('\n');
+                    tx.send(line).await?;
+                    copy_to_end_of_fragment(&mut lines, &feature, &qualifier, tx).await?;
+                }
+            }
+            return Ok(());
+        }
+    }
+    debug!("Include fragment: placeholder not found");
+    Ok(())
+}
+
+async fn copy_to_end_of_fragment<T>(lines: &mut Lines<T>, feature: &str, qualifier: &str, tx: &Sender<String>) -> Result<()>
+    where T: AsyncBufRead + Unpin {
+    while let Some(mut fragment_line) = lines.next_line().await? {
+        fragment_line.push('\n');
+        tx.send(fragment_line.clone()).await?;
+        if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
+            debug!("Found inner fragment: {:?}", &captures);
+            if is_matching_end(captures, feature, qualifier) {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_matching_end(captures: Captures, feature: &str, qualifier: &str) -> bool {
+    if let Some(inner_bracket) = captures.name("bracket") {
+        if inner_bracket.as_str() == "END " {
+            let inner_feature = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
+            if inner_feature != feature {
+                return false;
+            }
+            let inner_qualifier = captures.name("qualifier").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
+            if inner_qualifier != qualifier {
+                return false;
+            }
+            debug!("Found end of fragment: {:?}", &captures);
+            return true;
+        }
+    }
+    return false;
 }
 
 async fn open_target(target_file: AbsolutePath, invar_config: &InvarConfig) -> Result<Option<File>> {
@@ -261,7 +354,7 @@ async fn open_target(target_file: AbsolutePath, invar_config: &InvarConfig) -> R
             return Ok(None)
         },
         WriteMode::WriteNew => open_options.create_new(true),
-        WriteMode::Overwrite => open_options.create(true),
+        WriteMode::Overwrite => open_options.create(true).truncate(true),
     };
 
     let mut target_dir = target_file.to_path_buf();
