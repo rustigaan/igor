@@ -45,6 +45,9 @@ pub async fn process_niche(thunder_config: ThunderConfig) -> Result<()> {
     } else {
         Cow::Owned(InvarConfig::new())
     };
+    let invar_defaults = thunder_config.use_thundercloud().invar_defaults();
+    let invar_config = invar_config.with_invar_config(invar_defaults.as_ref());
+    debug!("String properties: {:?}", invar_config.string_props());
     visit_subtree(&current_directory, FromBothCumulusAndInvar, &thunder_config, invar_config.as_ref()).await?;
     Ok(())
 }
@@ -94,7 +97,7 @@ impl Bolt {
     fn kind_name(&self) -> &'static str {
         match self {
             Bolt::Option(_) => "option",
-            Bolt::Config(_) => " config",
+            Bolt::Config(_) => "config",
             Bolt::Fragment { .. } => "fragment",
             Bolt::Unknown { .. } => "unknown",
         }
@@ -396,6 +399,7 @@ async fn file_writer(rx: Receiver<String>, mut target: File) -> Result<()> {
 async fn update_invar_config<'a>(invar_config: &'a InvarConfig, bolts: &Vec<Bolt>) -> Result<Cow<'a,InvarConfig>> {
     let mut use_config = Cow::Borrowed(invar_config);
     for bolt in bolts {
+        debug!("Bolt kind: {:?}", bolt.kind_name());
         if let Bolt::Config(_) = bolt {
             let bolt_invar_config = get_invar_config(bolt.source()).await?;
             debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
@@ -403,6 +407,7 @@ async fn update_invar_config<'a>(invar_config: &'a InvarConfig, bolts: &Vec<Bolt
             use_config = Cow::Owned(new_use_config);
         }
     }
+    debug!("Updated invar config: {:?}", use_config);
     Ok(use_config)
 }
 

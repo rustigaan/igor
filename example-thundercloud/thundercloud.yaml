@@ -5,3 +5,6 @@ niche:
 invar-defaults:
   write-mode: Overwrite
   interpolate: true
+  props:
+    milk-man: Ronny Soak
+    alter-ego: Lobsang

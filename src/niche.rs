@@ -53,6 +53,6 @@ fn get_config(niche_directory: impl AsRef<Path>) -> anyhow::Result<NicheConfig> 
     let config: NicheConfig = serde_yaml::from_reader(file)?;
     debug!("Niche configuration: {config:?}");
     let use_thundercloud = config.use_thundercloud();
-    debug!("Niche simplified: {:?}: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.features(), use_thundercloud.params());
+    debug!("Niche simplified: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.features());
     Ok(config)
 }
