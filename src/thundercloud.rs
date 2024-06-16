@@ -9,6 +9,7 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
+use serde_yaml::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::fs::{DirBuilder, File, OpenOptions};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
@@ -144,6 +145,10 @@ static FRAGMENT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new("==== (?<bracket>(BEGIN|END) )?FRAGMENT (?<feature>[a-z0-9_]+|@)(-(?<qualifier>[a-z0-9_]+))? ====").unwrap()
 });
 
+static PLACE_HOLDER_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new("\\$\\{([^{}]*)}").unwrap()
+});
+
 #[derive(Clone, Copy)]
 enum Thumbs {
     FromCumulus,
@@ -247,7 +252,7 @@ async fn generate_option(option: Bolt, fragments: Vec<Bolt>, invar_config: &Inva
     let file = File::open(source.as_path()).await?;
     let buffered_reader = BufReader::new(file);
     let mut lines = buffered_reader.lines();
-    while let Some(mut line) = lines.next_line().await? {
+    while let Some(line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
             let feature = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
             let qualifier = captures.name("qualifier").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
@@ -260,8 +265,7 @@ async fn generate_option(option: Bolt, fragments: Vec<Bolt>, invar_config: &Inva
             find_and_include_fragment(&feature, &qualifier, tx, &fragments, invar_config).await?;
             continue;
         }
-        line.push('\n');
-        tx.send(line).await?;
+        send_to_writer(&line, invar_config, tx).await?;
     }
     Ok(())
 }
@@ -298,15 +302,14 @@ async fn include_fragment(fragment: &Bolt, feature: &str, qualifier: &str, tx: &
     let file = File::open(source.as_path()).await?;
     let buffered_reader = BufReader::new(file);
     let mut lines = buffered_reader.lines();
-    while let Some(mut line) = lines.next_line().await? {
+    while let Some(line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
             let placeholder_feature = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
             let placeholder_qualifier = captures.name("qualifier").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
             debug!("Found placeholder: {:?}: {:?}", &feature, &qualifier);
             if let Some(bracket) = captures.name("bracket") {
                 if bracket.as_str() == "BEGIN " && placeholder_feature == feature && placeholder_qualifier == qualifier {
-                    line.push('\n');
-                    tx.send(line).await?;
+                    send_to_writer(&line, invar_config, tx).await?;
                     copy_to_end_of_fragment(&mut lines, &feature, &qualifier, tx, fragments, invar_config).await?;
                 }
             }
@@ -319,12 +322,11 @@ async fn include_fragment(fragment: &Bolt, feature: &str, qualifier: &str, tx: &
 
 async fn copy_to_end_of_fragment<T>(lines: &mut Lines<T>, feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &InvarConfig) -> Result<()>
     where T: AsyncBufRead + Unpin {
-    while let Some(mut fragment_line) = lines.next_line().await? {
-        fragment_line.push('\n');
+    while let Some(fragment_line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
             debug!("Found inner fragment: {:?}", &captures);
             if is_matching_end(&captures, feature, qualifier) {
-                tx.send(fragment_line.clone()).await?;
+                send_to_writer(&fragment_line, invar_config, tx).await?;
                 break;
             } else {
                 if let Some(bracket) = captures.name("bracket") {
@@ -336,7 +338,7 @@ async fn copy_to_end_of_fragment<T>(lines: &mut Lines<T>, feature: &str, qualifi
                 continue;
             }
         }
-        tx.send(fragment_line.clone()).await?;
+        send_to_writer(&fragment_line, invar_config, tx).await?;
     }
     Ok(())
 }
@@ -357,6 +359,41 @@ fn is_matching_end(captures: &Captures, feature: &str, qualifier: &str) -> bool 
         }
     }
     return false;
+}
+
+async fn send_to_writer(line: &str, invar_config: &InvarConfig, tx: &Sender<String>) -> Result<()> {
+    let mut line = interpolate(&line, invar_config);
+    debug!("Send to writer: {:?}", line);
+    line.push('\n');
+    tx.send(line).await?;
+    Ok(())
+}
+
+fn interpolate(line: &str, invar_config: &InvarConfig) -> String {
+    let mut result = String::new();
+    let properties = invar_config.props();
+    let replacements = properties.as_ref();
+    let mut pos = 0;
+    for placeholder in PLACE_HOLDER_REGEX.captures_iter(line) {
+        if let (Some(extent), Some(expression)) = (placeholder.get(0),placeholder.get(1)) {
+            let expression = expression.as_str().to_string();
+            if let Some(Value::String(replacement)) = replacements.get(&expression) {
+                debug!("Found: [{:?}] -> [{:?}]", &expression, &replacement);
+                result.push_str(&line[pos..extent.start()]);
+                result.push_str(replacement);
+            } else {
+                debug!("Not found: [{:?}]", &expression);
+                result.push_str(&line[pos..extent.end()])
+            }
+            pos = extent.end();
+        } else {
+            debug!("No expression: [{:?}]", &line[pos..]);
+            result.push_str(&line[pos..]);
+            continue;
+        }
+    }
+    result.push_str(&line[pos..line.len()]);
+    result
 }
 
 async fn open_target(target_file: AbsolutePath, invar_config: &InvarConfig) -> Result<Option<File>> {
