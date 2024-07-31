@@ -16,6 +16,7 @@ use tokio::sync::mpsc::{channel, Sender, Receiver};
 use crate::config_model::{InvarConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
+use crate::config_model::UseThundercloudConfig;
 
 #[derive(Deserialize,Debug)]
 struct ThundercloudConfig {
@@ -30,7 +31,7 @@ struct NicheConfig {
     description: Option<String>,
 }
 
-pub async fn process_niche(thunder_config: ThunderConfig) -> Result<()> {
+pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     let thundercloud_directory = thunder_config.thundercloud_directory();
     let cumulus = thunder_config.cumulus();
     let invar = thunder_config.invar();
@@ -173,7 +174,7 @@ impl Thumbs {
     }
 }
 
-async fn visit_subtree(directory: &RelativePath, thumbs: Thumbs, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
+async fn visit_subtree<T: ThunderConfig>(directory: &RelativePath, thumbs: Thumbs, thunder_config: &T, invar_config: &InvarConfig) -> Result<()> {
     let (cumulus_bolts, cumulus_subdirectories) =
         try_visit_directory(thumbs.visit_cumulus(), ThunderConfig::cumulus, thunder_config, directory).await?;
     let (invar_bolts, invar_subdirectories) =
@@ -191,7 +192,7 @@ async fn visit_subtree(directory: &RelativePath, thumbs: Thumbs, thunder_config:
     Ok(())
 }
 
-async fn generate_files(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>,Vec<Bolt>)>, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
+async fn generate_files<T: ThunderConfig>(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>,Vec<Bolt>)>, thunder_config: &T, invar_config: &InvarConfig) -> Result<()> {
     let mut bolts = bolts;
     let mut use_config = Cow::Borrowed(invar_config);
     if let Some(dir_bolts) = bolts.remove(".") {
@@ -457,12 +458,12 @@ async fn get_invar_config(source: &AbsolutePath) -> Result<InvarConfig> {
     Ok(config)
 }
 
-fn combine_and_filter_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> (Option<Bolt>, Vec<Bolt>) {
+fn combine_and_filter_bolt_lists<T: ThunderConfig>(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>, thunder_config: &T) -> (Option<Bolt>, Vec<Bolt>) {
     let combined = combine_bolt_lists(cumulus_bolts_list, invar_bolts_list);
     filter_options(&combined, thunder_config)
 }
 
-fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> (Option<Bolt>, Vec<Bolt>) {
+fn filter_options<T: ThunderConfig>(bolt_list: &Vec<Bolt>, thunder_config: &T) -> (Option<Bolt>, Vec<Bolt>) {
     let mut features = AHashSet::new();
     features.insert("@");
     for feature in thunder_config.use_thundercloud().features() {
@@ -487,7 +488,7 @@ fn filter_options(bolt_list: &Vec<Bolt>, thunder_config: &ThunderConfig) -> (Opt
     (first_option, fragments)
 }
 
-async fn visit_subdirectories(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &ThunderConfig, invar_config: &InvarConfig) -> Result<()> {
+async fn visit_subdirectories<T: ThunderConfig>(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &T, invar_config: &InvarConfig) -> Result<()> {
     let mut invar_subdirectories = invar_subdirectories;
     for path in cumulus_subdirectories {
         let subdirectory_thumbs = if let Some(_) = invar_subdirectories.get(&path) {
@@ -544,7 +545,7 @@ fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bol
     result
 }
 
-async fn try_visit_directory(exists: bool, get_root: impl FnOnce(&ThunderConfig) -> &AbsolutePath, thunder_config: &ThunderConfig, directory: &RelativePath) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+async fn try_visit_directory<T: ThunderConfig>(exists: bool, get_root: impl FnOnce(&T) -> &AbsolutePath, thunder_config: &T, directory: &RelativePath) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
     if exists {
         let source_root = get_root(thunder_config);
         let in_cumulus = directory.clone().relative_to(source_root);
@@ -558,7 +559,7 @@ fn void_subtree() -> (AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>) {
     (AHashMap::new(), AHashSet::new())
 }
 
-async fn visit_directory(directory: &AbsolutePath, thunder_config: &ThunderConfig) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+async fn visit_directory<T: ThunderConfig>(directory: &AbsolutePath, thunder_config: &T) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
     trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", &directory, thunder_config.project_root(), thunder_config.invar());
     let mut bolts = AHashMap::new();
     let mut subdirectories = AHashSet::new();

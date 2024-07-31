@@ -19,7 +19,14 @@ pub enum OnIncoming {
 
 pub trait NicheConfig : Sized + Debug {
     fn from_reader<R>(reader: R) -> Result<Self> where R: Read;
-    fn use_thundercloud(&self) -> &UseThundercloudConfig;
+    fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
+    fn new_thunder_config(&self, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
+}
+
+#[derive(Deserialize,Debug)]
+struct NicheConfigData {
+    #[serde(rename = "use-thundercloud")]
+    use_thundercloud: UseThundercloudConfigData,
 }
 
 pub mod niche_config {
@@ -30,38 +37,49 @@ pub mod niche_config {
         Ok(config)
     }
 
-    #[derive(Deserialize,Debug)]
-    struct NicheConfigData {
-        #[serde(rename = "use-thundercloud")]
-        use_thundercloud: UseThundercloudConfig,
-    }
-
     impl NicheConfig for NicheConfigData {
         fn from_reader<R>(reader: R) -> Result<Self> where R: Read {
             let config: NicheConfigData = serde_yaml::from_reader(reader)?;
             Ok(config)
         }
 
-        fn use_thundercloud(&self) -> &UseThundercloudConfig {
+        fn use_thundercloud(&self) -> &impl UseThundercloudConfig {
             &self.use_thundercloud
+        }
+
+        fn new_thunder_config(&self, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig {
+            ThunderConfigData::new(
+                self.use_thundercloud.clone(),
+                thundercloud_directory,
+                invar,
+                project_root
+            )
         }
     }
 }
 
+pub trait ThunderConfig : Debug + Send + Sync {
+    fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
+    fn thundercloud_directory(&self) -> &AbsolutePath;
+    fn cumulus(&self) -> &AbsolutePath;
+    fn invar(&self) -> &AbsolutePath;
+    fn project_root(&self) -> &AbsolutePath;
+}
+
 #[derive(Debug)]
-pub struct ThunderConfig {
-    use_thundercloud: UseThundercloudConfig,
+struct ThunderConfigData {
+    use_thundercloud: UseThundercloudConfigData,
     thundercloud_directory: AbsolutePath,
     cumulus: AbsolutePath,
     invar: AbsolutePath,
     project: AbsolutePath,
 }
 
-impl ThunderConfig {
-    pub fn new(use_thundercloud: UseThundercloudConfig, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath) -> Self {
+impl ThunderConfigData {
+    fn new(use_thundercloud: UseThundercloudConfigData, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath) -> Self {
         let mut cumulus = thundercloud_directory.clone();
         cumulus.push("cumulus");
-        ThunderConfig {
+        ThunderConfigData {
             use_thundercloud,
             thundercloud_directory,
             cumulus,
@@ -69,31 +87,41 @@ impl ThunderConfig {
             project,
         }
     }
+}
 
-    pub fn use_thundercloud(&self) -> &UseThundercloudConfig {
+impl ThunderConfig for ThunderConfigData {
+
+    fn use_thundercloud(&self) -> &impl UseThundercloudConfig {
         &self.use_thundercloud
     }
 
-    pub fn thundercloud_directory(&self) -> &AbsolutePath {
+    fn thundercloud_directory(&self) -> &AbsolutePath {
         &self.thundercloud_directory
     }
 
-    pub fn cumulus(&self) -> &AbsolutePath {
+    fn cumulus(&self) -> &AbsolutePath {
         &self.cumulus
     }
 
-    pub fn invar(&self) -> &AbsolutePath {
+    fn invar(&self) -> &AbsolutePath {
         &self.invar
     }
 
-    pub fn project_root(&self) -> &AbsolutePath {
+    fn project_root(&self) -> &AbsolutePath {
         &self.project
     }
 }
 
+pub trait UseThundercloudConfig : Debug + Clone {
+    fn directory(&self) -> Option<&String>;
+    fn on_incoming(&self) -> &OnIncoming;
+    fn features(&self) -> &[String];
+    fn invar_defaults(&self) -> Cow<InvarConfig>;
+}
+
 #[allow(dead_code)]
 #[derive(Deserialize,Debug,Clone)]
-pub struct UseThundercloudConfig {
+struct UseThundercloudConfigData {
     directory: Option<String>,
     #[serde(rename = "git-remote")]
     git_remote: Option<GitRemoteConfig>,
@@ -107,17 +135,17 @@ pub struct UseThundercloudConfig {
 static UPDATE: Lazy<OnIncoming> = Lazy::new(|| OnIncoming::Update);
 static EMPTY_VEC: Lazy<Vec<String>> = Lazy::new(Vec::new);
 
-impl UseThundercloudConfig {
-    pub fn directory(&self) -> Option<&String> {
+impl UseThundercloudConfig for UseThundercloudConfigData {
+    fn directory(&self) -> Option<&String> {
         self.directory.as_ref()
     }
-    pub fn on_incoming(&self) -> &OnIncoming {
+    fn on_incoming(&self) -> &OnIncoming {
         &self.on_incoming.as_ref().unwrap_or(&UPDATE)
     }
-    pub fn features(&self) -> &[String] {
+    fn features(&self) -> &[String] {
         &self.features.as_deref().unwrap_or(&EMPTY_VEC)
     }
-    pub fn invar_defaults(&self) -> Cow<InvarConfig> {
+    fn invar_defaults(&self) -> Cow<InvarConfig> {
         if let Some(invar_defaults) = &self.invar_defaults {
             Cow::Borrowed(invar_defaults)
         } else {

@@ -30,8 +30,7 @@ pub async fn process_niche(project_root: impl AsRef<Path>, niches_directory: imp
 
         let mut invar = niche_directory.clone();
         invar.push("invar");
-        let thunder_config = ThunderConfig::new(
-            config.use_thundercloud().clone(),
+        let thunder_config = config.new_thunder_config(
             thundercloud_directory,
             invar,
             project_root
