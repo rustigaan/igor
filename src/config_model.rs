@@ -1,4 +1,7 @@
+use anyhow::Result;
 use std::borrow::Cow;
+use std::fmt::Debug;
+use std::io::Read;
 use ahash::AHashMap;
 use log::debug;
 use once_cell::sync::Lazy;
@@ -14,15 +17,34 @@ pub enum OnIncoming {
     Fail
 }
 
-#[derive(Deserialize,Debug)]
-pub struct NicheConfig {
-    #[serde(rename = "use-thundercloud")]
-    use_thundercloud: UseThundercloudConfig,
+pub trait NicheConfig : Sized + Debug {
+    fn from_reader<R>(reader: R) -> Result<Self> where R: Read;
+    fn use_thundercloud(&self) -> &UseThundercloudConfig;
 }
 
-impl NicheConfig {
-    pub fn use_thundercloud(&self) -> &UseThundercloudConfig {
-        &self.use_thundercloud
+pub mod niche_config {
+    use super::*;
+
+    pub fn from_reader<R>(reader: R) -> Result<impl NicheConfig> where R: Read {
+        let config: NicheConfigData = NicheConfig::from_reader(reader)?;
+        Ok(config)
+    }
+
+    #[derive(Deserialize,Debug)]
+    struct NicheConfigData {
+        #[serde(rename = "use-thundercloud")]
+        use_thundercloud: UseThundercloudConfig,
+    }
+
+    impl NicheConfig for NicheConfigData {
+        fn from_reader<R>(reader: R) -> Result<Self> where R: Read {
+            let config: NicheConfigData = serde_yaml::from_reader(reader)?;
+            Ok(config)
+        }
+
+        fn use_thundercloud(&self) -> &UseThundercloudConfig {
+            &self.use_thundercloud
+        }
     }
 }
 
