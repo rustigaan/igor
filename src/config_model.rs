@@ -19,7 +19,7 @@ pub enum OnIncoming {
 
 pub trait ThundercloudConfig : Debug + Sized {
     type InvarConfigImpl : InvarConfig;
-    fn from_reader<R>(reader: R) -> Result<Self> where R: Read;
+    fn from_reader<R: Read>(reader: R) -> Result<Self>;
     fn niche(&self) -> &impl NicheDescription;
     fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
 }
@@ -34,7 +34,7 @@ struct ThundercloudConfigData {
 pub mod thundercloud_config {
     use super::*;
 
-    pub fn from_reader<R>(reader: R) -> Result<impl ThundercloudConfig> where R: Read {
+    pub fn from_reader<R: Read>(reader: R) -> Result<impl ThundercloudConfig> {
         let config: ThundercloudConfigData = ThundercloudConfig::from_reader(reader)?;
         Ok(config)
     }
@@ -42,7 +42,7 @@ pub mod thundercloud_config {
     impl ThundercloudConfig for ThundercloudConfigData {
         type InvarConfigImpl = InvarConfigData;
 
-        fn from_reader<R>(reader: R) -> Result<Self> where R: Read {
+        fn from_reader<R: Read>(reader: R) -> Result<Self> {
             let config: ThundercloudConfigData = serde_yaml::from_reader(reader)?;
             Ok(config)
         }
@@ -85,7 +85,7 @@ impl NicheDescription for NicheDescriptionData {
 }
 
 pub trait NicheConfig : Sized + Debug {
-    fn from_reader<R>(reader: R) -> Result<Self> where R: Read;
+    fn from_reader<R: Read>(reader: R) -> Result<Self>;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
     fn new_thunder_config(&self, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
 }
@@ -99,13 +99,13 @@ struct NicheConfigData {
 pub mod niche_config {
     use super::*;
 
-    pub fn from_reader<R>(reader: R) -> Result<impl NicheConfig> where R: Read {
+    pub fn from_reader<R: Read>(reader: R) -> Result<impl NicheConfig> {
         let config: NicheConfigData = NicheConfig::from_reader(reader)?;
         Ok(config)
     }
 
     impl NicheConfig for NicheConfigData {
-        fn from_reader<R>(reader: R) -> Result<Self> where R: Read {
+        fn from_reader<R: Read>(reader: R) -> Result<Self> {
             let config: NicheConfigData = serde_yaml::from_reader(reader)?;
             Ok(config)
         }
@@ -242,7 +242,7 @@ pub enum WriteMode {
 
 #[allow(dead_code)]
 pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
-    fn from_reader<R>(reader: R) -> Result<Self> where R: Read;
+    fn from_reader<R: Read>(reader: R) -> Result<Self>;
     fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self>;
     fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self>;
     fn with_write_mode(&self, write_mode: WriteMode) -> Cow<Self>;
@@ -276,7 +276,7 @@ impl InvarConfigData {
 pub mod invar_config {
     use super::*;
 
-    pub fn from_reader<R>(reader: R) -> Result<impl InvarConfig> where R: Read {
+    pub fn from_reader<R: Read>(reader: R) -> Result<impl InvarConfig> {
         let config: InvarConfigData = InvarConfigData::from_reader(reader)?;
         Ok(config)
     }
@@ -284,7 +284,7 @@ pub mod invar_config {
 
 #[allow(dead_code)]
 impl InvarConfig for InvarConfigData {
-    fn from_reader<R>(reader: R) -> Result<Self> where R: Read {
+    fn from_reader<R: Read>(reader: R) -> Result<Self> {
         let config: InvarConfigData = serde_yaml::from_reader(reader)?;
         Ok(config)
     }
