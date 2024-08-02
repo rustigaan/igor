@@ -12,7 +12,7 @@ use serde_yaml::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::fs::{DirBuilder, File, OpenOptions};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
-use crate::config_model::{InvarConfig, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
+use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
@@ -435,7 +435,7 @@ async fn get_invar_config(source: &AbsolutePath) -> Result<impl InvarConfig> {
     info!("Config path: {source:?}");
 
     let file = std::fs::File::open(source.as_path())?;
-    let config = serde_yaml::from_reader(file)?;
+    let config = invar_config::from_reader(file)?;
     debug!("Invar configuration: {config:?}");
     Ok(config)
 }
