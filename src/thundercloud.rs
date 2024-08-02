@@ -8,28 +8,14 @@ use ahash::{AHashMap, AHashSet};
 use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
-use serde::Deserialize;
 use serde_yaml::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::fs::{DirBuilder, File, OpenOptions};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
-use crate::config_model::{InvarConfig, ThunderConfig, WriteMode};
+use crate::config_model::{InvarConfig, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
-
-#[derive(Deserialize,Debug)]
-struct ThundercloudConfig {
-    niche: NicheConfig,
-    #[serde(rename = "invar-defaults")]
-    invar_defaults: Option<InvarConfig>
-}
-
-#[derive(Deserialize,Debug)]
-struct NicheConfig {
-    name: String,
-    description: Option<String>,
-}
 
 pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     let thundercloud_directory = thunder_config.thundercloud_directory();
@@ -38,29 +24,25 @@ pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     let project_root = thunder_config.project_root();
     info!("Apply: {:?} ⊕ {:?} ⇒ {:?}", cumulus, invar, project_root);
     let config = get_config(thundercloud_directory)?;
-    let niche = &config.niche;
-    info!("Thundercloud: {:?}: {:?}", niche.name, niche.description.as_ref().unwrap_or(&"-".to_string()));
+    let niche = config.niche();
+    info!("Thundercloud: {:?}: {:?}", niche.name(), niche.description().as_ref().unwrap_or(&"-".to_string()));
     debug!("Use thundercloud: {:?}", thunder_config.use_thundercloud());
     let current_directory = RelativePath::from(".");
-    let invar_config = if let Some(invar_config) = &config.invar_defaults {
-        Cow::Borrowed(invar_config)
-    } else {
-        Cow::Owned(InvarConfig::new())
-    };
-    let invar_defaults = thunder_config.use_thundercloud().invar_defaults();
-    let invar_config = invar_config.with_invar_config(invar_defaults.as_ref());
+    let invar_config = config.invar_defaults();
+    let invar_defaults = thunder_config.use_thundercloud().invar_defaults().into_owned();
+    let invar_config = invar_config.with_invar_config(invar_defaults);
     debug!("String properties: {:?}", invar_config.string_props());
     visit_subtree(&current_directory, FromBothCumulusAndInvar, &thunder_config, invar_config.as_ref()).await?;
     Ok(())
 }
 
-fn get_config(thundercloud_directory: &AbsolutePath) -> Result<ThundercloudConfig> {
+fn get_config(thundercloud_directory: &AbsolutePath) -> Result<impl ThundercloudConfig> {
     let mut config_path = thundercloud_directory.clone();
     config_path.push("thundercloud.yaml");
     info!("Config path: {config_path:?}");
 
     let file = std::fs::File::open(&*config_path)?;
-    let config = serde_yaml::from_reader(file)?;
+    let config = thundercloud_config::from_reader(file)?;
     debug!("Thundercloud configuration: {config:?}");
     Ok(config)
 }
@@ -174,7 +156,7 @@ impl Thumbs {
     }
 }
 
-async fn visit_subtree<T: ThunderConfig>(directory: &RelativePath, thumbs: Thumbs, thunder_config: &T, invar_config: &InvarConfig) -> Result<()> {
+async fn visit_subtree<T: ThunderConfig, I: InvarConfig>(directory: &RelativePath, thumbs: Thumbs, thunder_config: &T, invar_config: &I) -> Result<()> {
     let (cumulus_bolts, cumulus_subdirectories) =
         try_visit_directory(thumbs.visit_cumulus(), ThunderConfig::cumulus, thunder_config, directory).await?;
     let (invar_bolts, invar_subdirectories) =
@@ -192,7 +174,7 @@ async fn visit_subtree<T: ThunderConfig>(directory: &RelativePath, thumbs: Thumb
     Ok(())
 }
 
-async fn generate_files<T: ThunderConfig>(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>,Vec<Bolt>)>, thunder_config: &T, invar_config: &InvarConfig) -> Result<()> {
+async fn generate_files<T: ThunderConfig, I: InvarConfig>(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>,Vec<Bolt>)>, thunder_config: &T, invar_config: &I) -> Result<()> {
     let mut bolts = bolts;
     let mut use_config = Cow::Borrowed(invar_config);
     if let Some(dir_bolts) = bolts.remove(".") {
@@ -217,7 +199,7 @@ async fn generate_files<T: ThunderConfig>(directory: &RelativePath, bolts: AHash
     Ok(())
 }
 
-async fn generate_file(target_file: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+async fn generate_file<I: InvarConfig>(target_file: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &I) -> Result<()> {
     if bolts.is_empty() {
         debug!("Skip: {:?}: {:?}", target_file, &bolts);
         return Ok(())
@@ -247,7 +229,7 @@ async fn generate_file(target_file: &AbsolutePath, option: Option<Bolt>, bolts: 
     Ok(())
 }
 
-async fn generate_option(option: Bolt, fragments: Vec<Bolt>, invar_config: &InvarConfig, tx: &Sender<String>) -> Result<()> {
+async fn generate_option<I: InvarConfig>(option: Bolt, fragments: Vec<Bolt>, invar_config: &I, tx: &Sender<String>) -> Result<()> {
     debug!("Generating option: {:?}: {:?}: {:?}", &option, &fragments, invar_config);
     let source = option.source();
     let file = File::open(source.as_path()).await?;
@@ -284,7 +266,7 @@ where T: AsyncBufRead + Unpin {
     Ok(())
 }
 
-async fn find_and_include_fragment(feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+async fn find_and_include_fragment<I: InvarConfig>(feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &I) -> Result<()> {
     for bolt in fragments {
         if let Bolt::Fragment { bolt_core, qualifier: fragment_qualifier, .. } = bolt {
             let fragment_qualifier = fragment_qualifier.as_ref().map(ToOwned::to_owned).unwrap_or("".to_string());
@@ -298,7 +280,7 @@ async fn find_and_include_fragment(feature: &str, qualifier: &str, tx: &Sender<S
     Ok(())
 }
 
-async fn include_fragment(fragment: &Bolt, feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &InvarConfig) -> Result<()> {
+async fn include_fragment<I: InvarConfig>(fragment: &Bolt, feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &I) -> Result<()> {
     let source = fragment.source();
     let file = File::open(source.as_path()).await?;
     let buffered_reader = BufReader::new(file);
@@ -321,7 +303,7 @@ async fn include_fragment(fragment: &Bolt, feature: &str, qualifier: &str, tx: &
     Ok(())
 }
 
-async fn copy_to_end_of_fragment<T>(lines: &mut Lines<T>, feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &InvarConfig) -> Result<()>
+async fn copy_to_end_of_fragment<T, I: InvarConfig>(lines: &mut Lines<T>, feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &I) -> Result<()>
     where T: AsyncBufRead + Unpin {
     while let Some(fragment_line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
@@ -362,7 +344,7 @@ fn is_matching_end(captures: &Captures, feature: &str, qualifier: &str) -> bool 
     return false;
 }
 
-async fn send_to_writer(line: &str, invar_config: &InvarConfig, tx: &Sender<String>) -> Result<()> {
+async fn send_to_writer<I: InvarConfig>(line: &str, invar_config: &I, tx: &Sender<String>) -> Result<()> {
     let mut line = interpolate(&line, invar_config);
     debug!("Send to writer: {:?}", line);
     line.push('\n');
@@ -370,7 +352,7 @@ async fn send_to_writer(line: &str, invar_config: &InvarConfig, tx: &Sender<Stri
     Ok(())
 }
 
-fn interpolate(line: &str, invar_config: &InvarConfig) -> String {
+fn interpolate<I: InvarConfig>(line: &str, invar_config: &I) -> String {
     let mut result = String::new();
     let properties = invar_config.props();
     let replacements = properties.as_ref();
@@ -397,7 +379,7 @@ fn interpolate(line: &str, invar_config: &InvarConfig) -> String {
     result
 }
 
-async fn open_target(target_file: AbsolutePath, invar_config: &InvarConfig) -> Result<Option<File>> {
+async fn open_target<I: InvarConfig>(target_file: AbsolutePath, invar_config: &I) -> Result<Option<File>> {
     let mut open_options = OpenOptions::new().read(false).write(true).to_owned();
     let open_options = match invar_config.write_mode() {
         WriteMode::Ignore => {
@@ -434,14 +416,14 @@ async fn file_writer(rx: Receiver<String>, mut target: File) -> Result<()> {
     Ok(())
 }
 
-async fn update_invar_config<'a>(invar_config: &'a InvarConfig, bolts: &Vec<Bolt>) -> Result<Cow<'a,InvarConfig>> {
+async fn update_invar_config<'a, I: InvarConfig>(invar_config: &'a I, bolts: &Vec<Bolt>) -> Result<Cow<'a, I>> {
     let mut use_config = Cow::Borrowed(invar_config);
     for bolt in bolts {
         debug!("Bolt kind: {:?}", bolt.kind_name());
         if let Bolt::Config(_) = bolt {
             let bolt_invar_config = get_invar_config(bolt.source()).await?;
             debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
-            let new_use_config = use_config.to_owned().with_invar_config(&bolt_invar_config).into_owned();
+            let new_use_config = use_config.to_owned().with_invar_config(bolt_invar_config).into_owned();
             use_config = Cow::Owned(new_use_config);
         }
     }
@@ -449,7 +431,7 @@ async fn update_invar_config<'a>(invar_config: &'a InvarConfig, bolts: &Vec<Bolt
     Ok(use_config)
 }
 
-async fn get_invar_config(source: &AbsolutePath) -> Result<InvarConfig> {
+async fn get_invar_config(source: &AbsolutePath) -> Result<impl InvarConfig> {
     info!("Config path: {source:?}");
 
     let file = std::fs::File::open(source.as_path())?;
@@ -488,7 +470,7 @@ fn filter_options<T: ThunderConfig>(bolt_list: &Vec<Bolt>, thunder_config: &T) -
     (first_option, fragments)
 }
 
-async fn visit_subdirectories<T: ThunderConfig>(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &T, invar_config: &InvarConfig) -> Result<()> {
+async fn visit_subdirectories<T: ThunderConfig,I: InvarConfig>(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &T, invar_config: &I) -> Result<()> {
     let mut invar_subdirectories = invar_subdirectories;
     for path in cumulus_subdirectories {
         let subdirectory_thumbs = if let Some(_) = invar_subdirectories.get(&path) {

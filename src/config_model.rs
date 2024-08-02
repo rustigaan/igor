@@ -17,6 +17,72 @@ pub enum OnIncoming {
     Fail
 }
 
+pub trait ThundercloudConfig : Debug {
+    type InvarConfigImpl : InvarConfig;
+    fn from_reader<R>(reader: R) -> Result<Self> where R: Read;
+    fn niche(&self) -> &impl NicheDescription;
+    fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
+}
+
+#[derive(Deserialize,Debug)]
+struct ThundercloudConfigData {
+    niche: NicheDescriptionData,
+    #[serde(rename = "invar-defaults")]
+    invar_defaults: Option<InvarConfigData>
+}
+
+pub mod thundercloud_config {
+    use super::*;
+
+    pub fn from_reader<R>(reader: R) -> Result<impl ThundercloudConfig> where R: Read {
+        let config: ThundercloudConfigData = ThundercloudConfig::from_reader(reader)?;
+        Ok(config)
+    }
+
+    impl ThundercloudConfig for ThundercloudConfigData {
+        type InvarConfigImpl = InvarConfigData;
+        fn from_reader<R>(reader: R) -> Result<Self> where R: Read {
+            let config: ThundercloudConfigData = serde_yaml::from_reader(reader)?;
+            Ok(config)
+        }
+
+        fn niche(&self) -> &impl NicheDescription {
+            &self.niche
+        }
+
+        fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl> {
+            let result: Cow<Self::InvarConfigImpl>;
+            if let Some(invar_config) = &self.invar_defaults {
+                result = Cow::Borrowed(invar_config)
+            } else {
+                result = Cow::Owned(invar_config::new())
+            }
+            result
+        }
+    }
+}
+
+pub trait NicheDescription {
+    fn name(&self) -> &str;
+    fn description(&self) -> &Option<String>;
+}
+
+#[derive(Deserialize,Debug)]
+struct NicheDescriptionData {
+    name: String,
+    description: Option<String>,
+}
+
+impl NicheDescription for NicheDescriptionData {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &Option<String> {
+        &self.description
+    }
+}
+
 pub trait NicheConfig : Sized + Debug {
     fn from_reader<R>(reader: R) -> Result<Self> where R: Read;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
@@ -113,10 +179,11 @@ impl ThunderConfig for ThunderConfigData {
 }
 
 pub trait UseThundercloudConfig : Debug + Clone {
+    type InvarConfigImpl : InvarConfig;
     fn directory(&self) -> Option<&String>;
     fn on_incoming(&self) -> &OnIncoming;
     fn features(&self) -> &[String];
-    fn invar_defaults(&self) -> Cow<InvarConfig>;
+    fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
 }
 
 #[allow(dead_code)]
@@ -129,13 +196,14 @@ struct UseThundercloudConfigData {
     on_incoming: Option<OnIncoming>,
     features: Option<Vec<String>>,
     #[serde(rename = "invar-defaults")]
-    invar_defaults: Option<InvarConfig>,
+    invar_defaults: Option<InvarConfigData>,
 }
 
 static UPDATE: Lazy<OnIncoming> = Lazy::new(|| OnIncoming::Update);
 static EMPTY_VEC: Lazy<Vec<String>> = Lazy::new(Vec::new);
 
 impl UseThundercloudConfig for UseThundercloudConfigData {
+    type InvarConfigImpl = InvarConfigData;
     fn directory(&self) -> Option<&String> {
         self.directory.as_ref()
     }
@@ -145,11 +213,11 @@ impl UseThundercloudConfig for UseThundercloudConfigData {
     fn features(&self) -> &[String] {
         &self.features.as_deref().unwrap_or(&EMPTY_VEC)
     }
-    fn invar_defaults(&self) -> Cow<InvarConfig> {
+    fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl> {
         if let Some(invar_defaults) = &self.invar_defaults {
             Cow::Borrowed(invar_defaults)
         } else {
-            Cow::Owned(InvarConfig::new())
+            Cow::Owned(invar_config::new())
         }
     }
 }
@@ -171,74 +239,117 @@ pub enum WriteMode {
     Ignore
 }
 
+pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
+    fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<impl InvarConfig>;
+    fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<impl InvarConfig>;
+    fn with_write_mode(&self, write_mode: WriteMode) -> Cow<impl InvarConfig>;
+    fn write_mode(&self) -> WriteMode;
+    fn write_mode_option(&self) -> Option<WriteMode>;
+    fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<impl InvarConfig>;
+    fn with_interpolate(&self, interpolate: bool) -> Cow<impl InvarConfig>;
+    fn interpolate(&self) -> bool;
+    fn interpolate_option(&self) -> Option<bool>;
+    fn with_props_option(&self, props: Option<Mapping>) -> Cow<impl InvarConfig>;
+    fn with_props(&self, props: Mapping) -> Cow<impl InvarConfig>;
+    fn props(&self) -> Cow<Mapping>;
+    fn props_option(&self) -> &Option<Mapping>;
+    fn string_props(&self) -> AHashMap<String,String>;
+}
+
 #[derive(Deserialize,Debug,Clone)]
-pub struct InvarConfig {
+pub struct InvarConfigData {
     #[serde(rename = "write-mode")]
     write_mode: Option<WriteMode>,
     interpolate: Option<bool>,
     props: Option<Mapping>,
 }
 
-#[allow(dead_code)]
-impl InvarConfig {
-    pub fn new() -> InvarConfig {
-        InvarConfig { write_mode: None, interpolate: None, props: None }
+impl InvarConfigData {
+    pub fn new() -> InvarConfigData {
+        InvarConfigData { write_mode: None, interpolate: None, props: None }
     }
+}
 
-    pub fn with_invar_config(&self, invar_config: &InvarConfig) -> Cow<InvarConfig> {
+pub mod invar_config {
+    use super::*;
+
+    pub fn new() -> impl InvarConfig {
+        InvarConfigData::new()
+    }
+}
+
+#[allow(dead_code)]
+impl InvarConfig for InvarConfigData {
+    // pub fn new() -> InvarConfig {
+    //     InvarConfig { write_mode: None, interpolate: None, props: None }
+    // }
+
+    fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<impl InvarConfig> {
         let dirty = false;
-        let (write_mode, dirty) = merge_property(self.write_mode, invar_config.write_mode, dirty);
+        let (write_mode, dirty) = merge_property(self.write_mode, invar_config.write_mode_option(), dirty);
         debug!("Write mode: {:?} -> {:?} ({:?})", self.write_mode, &write_mode, dirty);
-        let (interpolate, dirty) = merge_property(self.interpolate, invar_config.interpolate, dirty);
+        let (interpolate, dirty) = merge_property(self.interpolate, invar_config.interpolate_option(), dirty);
         debug!("Interpolate: {:?} -> {:?} ({:?})", self.interpolate, &interpolate, dirty);
-        let (props, dirty) = merge_props(&self.props, &invar_config.props, dirty);
+        let (props, dirty) = merge_props(&self.props, &invar_config.props_option(), dirty);
         if dirty {
-            Cow::Owned(InvarConfig { write_mode, interpolate, props: Some(props.into_owned()) })
+            Cow::Owned(InvarConfigData { write_mode, interpolate, props: Some(props.into_owned()) })
         } else {
             Cow::Borrowed(self)
         }
     }
 
-    pub fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<InvarConfig> {
-        let invar_config = InvarConfig { write_mode, interpolate: None, props: None };
-        self.with_invar_config(&invar_config)
+    fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<impl InvarConfig> {
+        let invar_config = InvarConfigData { write_mode, interpolate: None, props: None };
+        self.with_invar_config(invar_config)
     }
 
-    pub fn with_write_mode(&self, write_mode: WriteMode) -> Cow<InvarConfig> {
+    fn with_write_mode(&self, write_mode: WriteMode) -> Cow<impl InvarConfig> {
         self.with_write_mode_option(Some(write_mode))
     }
 
-    pub fn write_mode(&self) -> WriteMode {
+    fn write_mode(&self) -> WriteMode {
         self.write_mode.unwrap_or(WriteMode::Overwrite)
     }
 
-    pub fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<InvarConfig> {
-        let invar_config = InvarConfig { write_mode: None, interpolate, props: None };
-        self.with_invar_config(&invar_config)
+    fn write_mode_option(&self) -> Option<WriteMode> {
+        self.write_mode
     }
 
-    pub fn with_interpolate(&self, interpolate: bool) -> Cow<InvarConfig> {
+    fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<impl InvarConfig> {
+        let invar_config = InvarConfigData { write_mode: None, interpolate, props: None };
+        self.with_invar_config(invar_config)
+    }
+
+    fn with_interpolate(&self, interpolate: bool) -> Cow<impl InvarConfig> {
         self.with_interpolate_option(Some(interpolate))
     }
 
-    pub fn interpolate(&self) -> bool {
+    fn interpolate(&self) -> bool {
         self.interpolate.unwrap_or(true)
     }
 
-    pub fn with_props_option(&self, props: Option<Mapping>) -> Cow<InvarConfig> {
-        let invar_config = InvarConfig { write_mode: None, interpolate: None, props };
-        self.with_invar_config(&invar_config)
+    fn interpolate_option(&self) -> Option<bool> {
+        self.interpolate
     }
 
-    pub fn with_props(&self, props: Mapping) -> Cow<InvarConfig> {
+    fn with_props_option(&self, props: Option<Mapping>) -> Cow<impl InvarConfig> {
+        let invar_config = InvarConfigData { write_mode: None, interpolate: None, props };
+        self.with_invar_config(invar_config)
+    }
+
+    fn with_props(&self, props: Mapping) -> Cow<impl InvarConfig> {
         self.with_props_option(Some(props))
     }
 
-    pub fn props(&self) -> Cow<Mapping> {
+    fn props(&self) -> Cow<Mapping> {
         self.props.as_ref().map(Cow::Borrowed).unwrap_or(Cow::Owned(Mapping::new()))
     }
 
-    pub fn string_props(&self) -> AHashMap<String,String> {
+    fn props_option(&self) -> &Option<Mapping> {
+        &self.props
+    }
+
+    fn string_props(&self) -> AHashMap<String,String> {
         to_string_map(self.props().as_ref())
     }
 }
