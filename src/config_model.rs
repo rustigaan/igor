@@ -225,7 +225,7 @@ impl UseThundercloudConfig for UseThundercloudConfigData {
 
 #[allow(dead_code)]
 #[derive(Deserialize,Debug,Clone)]
-pub struct GitRemoteConfig {
+struct GitRemoteConfig {
     #[serde(rename = "fetch-url")]
     fetch_url: String,
     revision: String,
@@ -260,7 +260,7 @@ pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
 }
 
 #[derive(Deserialize,Debug,Clone)]
-pub struct InvarConfigData {
+struct InvarConfigData {
     #[serde(rename = "write-mode")]
     write_mode: Option<WriteMode>,
     interpolate: Option<bool>,
@@ -268,7 +268,7 @@ pub struct InvarConfigData {
 }
 
 impl InvarConfigData {
-    pub fn new() -> InvarConfigData {
+    fn new() -> InvarConfigData {
         InvarConfigData { write_mode: None, interpolate: None, props: None }
     }
 }
