@@ -17,3 +17,7 @@ serde_yaml = "0.9.33"
 tokio = { version = "^1.36.0", features = ["macros","rt-multi-thread","time","signal","fs","io-util"] }
 tokio-stream = "^0.1.15"
 serde = { version = "1.0.197", features = ["derive"] }
+
+[dev-dependencies]
+stringreader = "^0.1.1"
+test-log = "^0.2.16"
