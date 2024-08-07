@@ -591,6 +591,108 @@ mod test_trait_invar_config {
         assert_eq!(updated.interpolate, Some(false)); // Old value unchanged
     }
 
+    // Properties
+
+    #[test]
+    fn with_props_from_none_to_something() {
+        let mut invar_config = InvarConfigData::new();
+        invar_config.props = None;
+        let mut mapping = Mapping::new();
+        insert_entry(&mut mapping, "foo", "bar");
+        let updated = invar_config.with_props(mapping.clone());
+        assert_owned(&updated);
+        assert_eq!(updated.props, Some(mapping));
+    }
+
+    #[test]
+    fn with_props_from_none_to_some_thing() {
+        let mut invar_config = InvarConfigData::new();
+        invar_config.props = None;
+        let mut mapping = Mapping::new();
+        insert_entry(&mut mapping, "foo", "bar");
+        let updated = invar_config.with_props_option(Some(mapping.clone()));
+        assert_owned(&updated);
+        assert_eq!(updated.props, Some(mapping));
+    }
+
+    #[test]
+    fn with_props_from_none_to_none() {
+        // Given
+        let mut invar_config = InvarConfigData::new();
+        invar_config.props = None;
+
+        // When
+        let updated = invar_config.with_props_option(None);
+
+        // Then
+        assert_owned(&updated);
+        assert_eq!(updated.props, Some(Mapping::new()));
+    }
+
+    #[test]
+    fn with_props_from_something_add_same() {
+        // Given
+        let mut invar_config = InvarConfigData::new();
+        let mut old_mapping = Mapping::new();
+        insert_entry(&mut old_mapping, "foo", "bar");
+        insert_entry(&mut old_mapping, "food", "baz");
+        let old_mapping = old_mapping; // No longer mutable
+        invar_config.props = Some(old_mapping.clone());
+        let mut new_mapping = Mapping::new();
+        insert_entry(&mut new_mapping, "foo", "bar");
+
+        // When
+        let updated = invar_config.with_props(new_mapping.clone());
+
+        // Then
+        assert_borrowed(&updated);
+        assert_eq!(updated.props, Some(old_mapping));
+    }
+
+    #[test]
+    fn with_props_from_something_add_different() {
+        // Given
+        let mut invar_config = InvarConfigData::new();
+        let mut old_mapping = Mapping::new();
+        insert_entry(&mut old_mapping, "foo", "bar");
+        insert_entry(&mut old_mapping, "food", "baz");
+        let old_mapping = old_mapping; // No longer mutable
+        invar_config.props = Some(old_mapping.clone());
+        let mut new_mapping = Mapping::new();
+        insert_entry(&mut new_mapping, "foo", "beep");
+
+        // When
+        let updated = invar_config.with_props(new_mapping.clone());
+
+        // Then
+        let mut updated_mapping = old_mapping.clone();
+        assert_owned(&updated);
+        insert_entry(&mut updated_mapping, "foo", "beep");
+        assert_eq!(updated.props, Some(updated_mapping));
+    }
+
+    #[test]
+    fn with_props_from_something_add_new() {
+        // Given
+        let mut invar_config = InvarConfigData::new();
+        let mut old_mapping = Mapping::new();
+        insert_entry(&mut old_mapping, "foo", "bar");
+        insert_entry(&mut old_mapping, "food", "baz");
+        let old_mapping = old_mapping; // No longer mutable
+        invar_config.props = Some(old_mapping.clone());
+        let mut new_mapping = Mapping::new();
+        insert_entry(&mut new_mapping, "oh", "joy");
+
+        // When
+        let updated = invar_config.with_props(new_mapping.clone());
+
+        // Then
+        let mut updated_mapping = old_mapping.clone();
+        assert_owned(&updated);
+        insert_entry(&mut updated_mapping, "oh", "joy");
+        assert_eq!(updated.props, Some(updated_mapping));
+    }
+
     // Utility functions
 
     fn assert_owned(invar_config: &Cow<impl InvarConfig>) {
@@ -607,5 +709,11 @@ mod test_trait_invar_config {
         } else {
             assert_eq!("owned", "borrowed")
         }
+    }
+
+    fn insert_entry<K: Into<String>, V: Into<String>>(props: &mut Mapping, key: K, value: V) {
+        let wrapped_key = Value::String(key.into());
+        let wrapped_value = Value::String(value.into());
+        props.insert(wrapped_key, wrapped_value);
     }
 }
