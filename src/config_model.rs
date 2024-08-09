@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::Result;
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -181,18 +183,19 @@ impl ThunderConfig for ThunderConfigData {
 
 pub trait UseThundercloudConfig : Debug + Clone {
     type InvarConfigImpl : InvarConfig;
+    type GitRemoteConfigImpl : GitRemoteConfig;
     fn directory(&self) -> Option<&String>;
     fn on_incoming(&self) -> &OnIncoming;
     fn features(&self) -> &[String];
     fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
+    fn git_remote(&self) -> Option<&Self::GitRemoteConfigImpl>;
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize,Debug,Clone)]
 struct UseThundercloudConfigData {
     directory: Option<String>,
     #[serde(rename = "git-remote")]
-    git_remote: Option<GitRemoteConfig>,
+    git_remote: Option<GitRemoteConfigData>,
     #[serde(rename = "on-incoming")]
     on_incoming: Option<OnIncoming>,
     features: Option<Vec<String>>,
@@ -200,11 +203,33 @@ struct UseThundercloudConfigData {
     invar_defaults: Option<InvarConfigData>,
 }
 
+pub trait GitRemoteConfig {
+    fn fetch_url(&self) -> &str;
+    fn revision(&self) -> &str;
+}
+
+#[derive(Deserialize,Debug,Clone)]
+struct GitRemoteConfigData {
+    #[serde(rename = "fetch-url")]
+    fetch_url: String,
+    revision: String,
+}
+
+impl GitRemoteConfig for GitRemoteConfigData {
+    fn fetch_url(&self) -> &str {
+        &self.fetch_url
+    }
+    fn revision(&self) -> &str {
+        &self.revision
+    }
+}
+
 static UPDATE: Lazy<OnIncoming> = Lazy::new(|| OnIncoming::Update);
 static EMPTY_VEC: Lazy<Vec<String>> = Lazy::new(Vec::new);
 
 impl UseThundercloudConfig for UseThundercloudConfigData {
     type InvarConfigImpl = InvarConfigData;
+    type GitRemoteConfigImpl = GitRemoteConfigData;
     fn directory(&self) -> Option<&String> {
         self.directory.as_ref()
     }
@@ -221,16 +246,9 @@ impl UseThundercloudConfig for UseThundercloudConfigData {
             Cow::Owned(Self::InvarConfigImpl::new())
         }
     }
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize,Debug,Clone)]
-struct GitRemoteConfig {
-    #[serde(rename = "fetch-url")]
-    fetch_url: String,
-    revision: String,
-    #[serde(rename = "on-incoming")]
-    on_incoming: Option<OnIncoming>,
+    fn git_remote(&self) -> Option<&Self::GitRemoteConfigImpl> {
+        self.git_remote.as_ref()
+    }
 }
 
 #[derive(Deserialize,Debug,Clone,Copy,Eq, PartialEq)]
@@ -240,7 +258,6 @@ pub enum WriteMode {
     Ignore
 }
 
-#[allow(dead_code)]
 pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
     fn from_reader<R: Read>(reader: R) -> Result<Self>;
     fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self>;
@@ -312,7 +329,6 @@ pub mod invar_config {
     }
 }
 
-#[allow(dead_code)]
 impl InvarConfig for InvarConfigData {
     fn from_reader<R: Read>(reader: R) -> Result<Self> {
         let config: InvarConfigData = serde_yaml::from_reader(reader)?;
