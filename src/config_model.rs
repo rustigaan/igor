@@ -693,6 +693,25 @@ mod test_trait_invar_config {
         assert_eq!(updated.props, Some(updated_mapping));
     }
 
+    #[test]
+    fn string_props() {
+        // Given
+        let mut invar_config = InvarConfigData::new();
+        let mut mapping = Mapping::new();
+        insert_entry(&mut mapping, "foo", "bar");
+        insert_entry(&mut mapping, "food", "baz");
+        invar_config.props = Some(mapping.clone());
+
+        // When
+        let string_props = invar_config.string_props();
+
+        // Then
+        let mut expected = AHashMap::new();
+        expected.insert("foo".to_string(), "bar".to_string());
+        expected.insert("food".to_string(), "baz".to_string());
+        assert_eq!(string_props, expected);
+    }
+
     // Utility functions
 
     fn assert_owned(invar_config: &Cow<impl InvarConfig>) {
