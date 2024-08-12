@@ -34,6 +34,23 @@ impl AbsolutePath {
     }
 }
 
+impl TryFrom<String> for AbsolutePath {
+    type Error = anyhow::Error;
+
+    fn try_from(path: String) -> std::result::Result<Self, Self::Error> {
+        let path_buf = PathBuf::from(path);
+        AbsolutePath::try_new(path_buf)
+    }
+}
+
+impl TryFrom<&str> for AbsolutePath {
+    type Error = anyhow::Error;
+
+    fn try_from(path: &str) -> std::result::Result<Self, Self::Error> {
+        AbsolutePath::try_from(path.to_string())
+    }
+}
+
 impl RelativePath {
     pub fn push(&mut self, path: impl Into<RelativePath>) -> () {
         let relative_path = path.into();

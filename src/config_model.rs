@@ -128,6 +128,7 @@ pub mod niche_config {
 
     #[cfg(test)]
     mod test {
+        use std::path::PathBuf;
         use super::*;
         use indoc::indoc;
         use stringreader::{StringReader};
@@ -176,6 +177,32 @@ pub mod niche_config {
             insert_entry(&mut mapping, "milk-man", "Kaos");
             assert_eq!(invar_defaults.props().into_owned(), mapping);
 
+            Ok(())
+        }
+
+        #[test]
+        fn test_new_thunder_config() -> Result<()> {
+            // Given
+            let yaml_source = StringReader::new(indoc! {r#"
+                ---
+                use-thundercloud:
+                  directory: "{{PROJECT}}/example-thundercloud"
+            "#});
+            let niche_config = from_reader(yaml_source)?;
+            let thunder_cloud_dir = AbsolutePath::try_from("/tmp")?;
+            let invar_dir = AbsolutePath::try_from("/var/tmp")?;
+            let project_root = AbsolutePath::try_from("/")?;
+            let cumulus = AbsolutePath::new(PathBuf::from("cumulus"), &thunder_cloud_dir);
+
+            // When
+            let thunder_config = niche_config.new_thunder_config(thunder_cloud_dir.clone(), invar_dir.clone(), project_root.clone());
+
+            // Then
+            assert_eq!(thunder_config.use_thundercloud().directory(), niche_config.use_thundercloud().directory());
+            assert_eq!(thunder_config.project_root().as_path(), project_root.as_path());
+            assert_eq!(thunder_config.thundercloud_directory().as_path(), thunder_cloud_dir.as_path());
+            assert_eq!(thunder_config.invar().as_path(), invar_dir.as_path());
+            assert_eq!(thunder_config.cumulus().as_path(), cumulus.as_path());
             Ok(())
         }
     }
