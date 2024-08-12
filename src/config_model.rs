@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 pub mod invar_config;
-pub use invar_config::{from_reader, InvarConfig, WriteMode};
+pub use invar_config::{InvarConfig, WriteMode};
 mod invar_config_data;
 use invar_config_data::InvarConfigData;
 
