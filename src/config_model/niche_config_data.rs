@@ -1,7 +1,8 @@
 use std::io::Read;
 use serde::Deserialize;
-use crate::config_model::niche_config::NicheConfig;
-use crate::config_model::{ThunderConfig, ThunderConfigData, UseThundercloudConfig, UseThundercloudConfigData};
+use super::{ThunderConfig, UseThundercloudConfig, UseThundercloudConfigData};
+use super::niche_config::NicheConfig;
+use super::thunder_config_data::ThunderConfigData;
 use crate::path::AbsolutePath;
 
 #[derive(Deserialize,Debug)]

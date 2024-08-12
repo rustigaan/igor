@@ -17,13 +17,16 @@ pub mod niche_config;
 pub use niche_config::NicheConfig;
 mod niche_config_data;
 
+mod thunder_config;
+pub use thunder_config::ThunderConfig;
+mod thunder_config_data;
+
 use anyhow::Result;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::io::Read;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use crate::path::AbsolutePath;
 
 #[derive(Deserialize,Debug,Clone,Eq, PartialEq)]
 pub enum OnIncoming {
@@ -31,60 +34,6 @@ pub enum OnIncoming {
     Ignore,
     Warn,
     Fail
-}
-
-pub trait ThunderConfig : Debug + Send + Sync {
-    fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
-    fn thundercloud_directory(&self) -> &AbsolutePath;
-    fn cumulus(&self) -> &AbsolutePath;
-    fn invar(&self) -> &AbsolutePath;
-    fn project_root(&self) -> &AbsolutePath;
-}
-
-#[derive(Debug)]
-struct ThunderConfigData {
-    use_thundercloud: UseThundercloudConfigData,
-    thundercloud_directory: AbsolutePath,
-    cumulus: AbsolutePath,
-    invar: AbsolutePath,
-    project: AbsolutePath,
-}
-
-impl ThunderConfigData {
-    fn new(use_thundercloud: UseThundercloudConfigData, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath) -> Self {
-        let mut cumulus = thundercloud_directory.clone();
-        cumulus.push("cumulus");
-        ThunderConfigData {
-            use_thundercloud,
-            thundercloud_directory,
-            cumulus,
-            invar,
-            project,
-        }
-    }
-}
-
-impl ThunderConfig for ThunderConfigData {
-
-    fn use_thundercloud(&self) -> &impl UseThundercloudConfig {
-        &self.use_thundercloud
-    }
-
-    fn thundercloud_directory(&self) -> &AbsolutePath {
-        &self.thundercloud_directory
-    }
-
-    fn cumulus(&self) -> &AbsolutePath {
-        &self.cumulus
-    }
-
-    fn invar(&self) -> &AbsolutePath {
-        &self.invar
-    }
-
-    fn project_root(&self) -> &AbsolutePath {
-        &self.project
-    }
 }
 
 pub trait UseThundercloudConfig : Debug + Clone {
