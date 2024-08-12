@@ -1,5 +1,5 @@
-use super::ThunderConfig;
-use super::{UseThundercloudConfig, UseThundercloudConfigData};
+use super::{ThunderConfig, UseThundercloudConfig};
+use super::use_thundercloud_config_data::UseThundercloudConfigData;
 use crate::path::AbsolutePath;
 
 #[derive(Debug)]

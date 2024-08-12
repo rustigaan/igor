@@ -158,9 +158,9 @@ fn to_strings(entry: (&Value, &Value)) -> Option<(String, String)> {
 }
 
 #[cfg(test)]
-mod test_trait_invar_config {
+mod test {
     use super::*;
-    use super::super::test_utils::insert_entry;
+    use super::super::serde_test_utils::insert_entry;
     use crate::config_model::WriteMode::*;
     use test_log::test;
 

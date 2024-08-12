@@ -20,7 +20,7 @@ pub fn from_reader<R: Read>(reader: R) -> Result<impl NicheConfig> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::test_utils::insert_entry;
+    use super::serde_test_utils::insert_entry;
     use super::OnIncoming::Update;
     use super::WriteMode::Ignore;
     use indoc::indoc;
