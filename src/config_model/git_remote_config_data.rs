@@ -16,3 +16,12 @@ impl GitRemoteConfig for GitRemoteConfigData {
         &self.revision
     }
 }
+
+impl GitRemoteConfigData {
+    pub fn new(fetch_url: impl Into<String>, revision: impl Into<String>) -> Self {
+        GitRemoteConfigData {
+            fetch_url: fetch_url.into(),
+            revision: revision.into(),
+        }
+    }
+}
