@@ -18,7 +18,7 @@ pub fn from_reader<R: Read>(reader: R) -> Result<impl NicheConfig> {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::*;
     use super::serde_test_utils::insert_entry;
     use super::OnIncoming::Update;
@@ -30,7 +30,7 @@ mod test {
     use stringreader::StringReader;
 
     #[test]
-    fn test_from_reader() -> Result<()> {
+    pub fn test_from_reader() -> Result<()> {
         // Given
         let yaml = indoc! {r#"
                 ---
@@ -57,7 +57,7 @@ mod test {
 
         // Then
         let use_thundercloud = niche_config.use_thundercloud();
-        assert_eq!(use_thundercloud.directory(), Some("{{PROJECT}}/example-thundercloud".to_string()).as_ref());
+        assert_eq!(use_thundercloud.directory(), Some("{{PROJECT}}/example-thundercloud"));
         assert_eq!(use_thundercloud.on_incoming(), &Update);
         assert_eq!(use_thundercloud.features(), &["glass", "bash_config", "kermie"]);
 
@@ -75,7 +75,7 @@ mod test {
     }
 
     #[test]
-    fn test_new_thunder_config() -> Result<()> {
+    pub fn test_new_thunder_config() -> Result<()> {
         // Given
         let yaml_source = StringReader::new(indoc! {r#"
                 ---

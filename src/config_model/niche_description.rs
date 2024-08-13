@@ -2,7 +2,7 @@ pub use crate::config_model::niche_description_data::NicheDescriptionData;
 
 pub trait NicheDescription {
     fn name(&self) -> &str;
-    fn description(&self) -> Option<&String>;
+    fn description(&self) -> Option<&str>;
 }
 
 #[cfg(test)]
@@ -25,6 +25,6 @@ mod test {
 
         // Then
         assert_eq!(niche_description.name(), name);
-        assert_eq!(niche_description.description().map(std::string::String::as_ref), description);
+        assert_eq!(niche_description.description(), description);
     }
 }

@@ -23,7 +23,7 @@ impl NicheDescription for NicheDescriptionData {
         &self.name
     }
 
-    fn description(&self) -> Option<&String> {
-        self.description.as_ref()
+    fn description(&self) -> Option<&str> {
+        self.description.as_ref().map(String::as_ref)
     }
 }

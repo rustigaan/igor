@@ -9,3 +9,13 @@ pub trait ThunderConfig : Debug + Send + Sync {
     fn invar(&self) -> &AbsolutePath;
     fn project_root(&self) -> &AbsolutePath;
 }
+
+#[cfg(test)]
+mod test {
+    use anyhow::Result;
+
+    #[test]
+    fn test_new_thunder_config() -> Result<()> {
+        super::super::niche_config::test::test_new_thunder_config()
+    }
+}
