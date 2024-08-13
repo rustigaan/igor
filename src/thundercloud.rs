@@ -25,7 +25,7 @@ pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     info!("Apply: {:?} ⊕ {:?} ⇒ {:?}", cumulus, invar, project_root);
     let config = get_config(thundercloud_directory)?;
     let niche = config.niche();
-    info!("Thundercloud: {:?}: {:?}", niche.name(), niche.description().as_ref().unwrap_or(&"-".to_string()));
+    info!("Thundercloud: {:?}: {:?}", niche.name(), niche.description().unwrap_or(&"-".to_string()));
     debug!("Use thundercloud: {:?}", thunder_config.use_thundercloud());
     let current_directory = RelativePath::from(".");
     let invar_config = config.invar_defaults();
