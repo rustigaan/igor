@@ -4,6 +4,7 @@ use clap::Parser;
 use log::{error, info};
 
 mod config_model;
+mod file_system;
 mod interpolate;
 mod niche;
 mod path;

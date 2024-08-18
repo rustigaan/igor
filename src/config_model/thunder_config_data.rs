@@ -1,18 +1,21 @@
+use crate::file_system::{DirEntry, FileSystem};
 use super::{ThunderConfig, UseThundercloudConfig};
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
 use crate::path::AbsolutePath;
 
 #[derive(Debug)]
-pub struct ThunderConfigData {
+pub struct ThunderConfigData<TFS: FileSystem, PFS: FileSystem> {
     use_thundercloud: UseThundercloudConfigData,
     thundercloud_directory: AbsolutePath,
     cumulus: AbsolutePath,
     invar: AbsolutePath,
     project: AbsolutePath,
+    thundercloud_file_system: TFS,
+    project_file_system: PFS,
 }
 
-impl ThunderConfigData {
-    pub fn new(use_thundercloud: UseThundercloudConfigData, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath) -> Self {
+impl<TFS: FileSystem, PFS: FileSystem> ThunderConfigData<TFS, PFS> {
+    pub fn new(use_thundercloud: UseThundercloudConfigData, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath, thundercloud_file_system: &TFS, project_file_system: &PFS) -> Self {
         let mut cumulus = thundercloud_directory.clone();
         cumulus.push("cumulus");
         ThunderConfigData {
@@ -21,11 +24,13 @@ impl ThunderConfigData {
             cumulus,
             invar,
             project,
+            thundercloud_file_system: *thundercloud_file_system,
+            project_file_system: *project_file_system,
         }
     }
 }
 
-impl ThunderConfig for ThunderConfigData {
+impl<TFS: FileSystem, PFS: FileSystem> ThunderConfig for ThunderConfigData<TFS, PFS> {
 
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig {
         &self.use_thundercloud
@@ -45,5 +50,13 @@ impl ThunderConfig for ThunderConfigData {
 
     fn project_root(&self) -> &AbsolutePath {
         &self.project
+    }
+
+    fn thundercloud_file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
+        &self.thundercloud_file_system
+    }
+
+    fn project_file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
+        &self.project_file_system
     }
 }

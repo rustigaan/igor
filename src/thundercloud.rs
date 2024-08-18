@@ -16,6 +16,7 @@ use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercl
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
+use crate::file_system::{DirEntry, FileSystem};
 
 pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     let thundercloud_directory = thunder_config.thundercloud_directory();
@@ -156,11 +157,41 @@ impl Thumbs {
     }
 }
 
+trait DirectoryLocation {
+    fn file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry>;
+    fn directory<'a, T: ThunderConfig>(&self, thunder_config: &'a T) -> &'a AbsolutePath;
+}
+
+struct CumulusDirectoryLocation<FS: FileSystem>(FS);
+struct InvarDirectoryLocation<FS: FileSystem>(FS);
+
+impl<FS: FileSystem> DirectoryLocation for InvarDirectoryLocation<FS> {
+    fn file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
+        &self.0
+    }
+
+    fn directory<'a, T: ThunderConfig>(&self, thunder_config: &'a T) -> &'a AbsolutePath {
+        thunder_config.invar()
+    }
+}
+
+impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
+    fn file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
+        &self.0
+    }
+
+    fn directory<'a, T: ThunderConfig>(&self, thunder_config: &'a T) -> &'a AbsolutePath {
+        thunder_config.cumulus()
+    }
+}
+
 async fn visit_subtree<T: ThunderConfig, I: InvarConfig>(directory: &RelativePath, thumbs: Thumbs, thunder_config: &T, invar_config: &I) -> Result<()> {
+    let cumulus_directory_location = CumulusDirectoryLocation(*thunder_config.thundercloud_file_system());
     let (cumulus_bolts, cumulus_subdirectories) =
-        try_visit_directory(thumbs.visit_cumulus(), ThunderConfig::cumulus, thunder_config, directory).await?;
+        try_visit_directory(thumbs.visit_cumulus(), &cumulus_directory_location, thunder_config, directory).await?;
+    let invar_directory_location = InvarDirectoryLocation(*thunder_config.project_file_system());
     let (invar_bolts, invar_subdirectories) =
-        try_visit_directory(thumbs.visit_invar(), ThunderConfig::invar, thunder_config, directory).await?;
+        try_visit_directory(thumbs.visit_invar(), &invar_directory_location, thunder_config, directory).await?;
 
     let bolts = combine(cumulus_bolts, invar_bolts);
     for (key, bolt_lists) in &bolts {
@@ -527,9 +558,9 @@ fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bol
     result
 }
 
-async fn try_visit_directory<T: ThunderConfig>(exists: bool, get_root: impl FnOnce(&T) -> &AbsolutePath, thunder_config: &T, directory: &RelativePath) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+async fn try_visit_directory<DL: DirectoryLocation, T: ThunderConfig>(exists: bool, directory_location: &DL, thunder_config: &T, directory: &RelativePath) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
     if exists {
-        let source_root = get_root(thunder_config);
+        let source_root = directory_location.directory(thunder_config);
         let in_cumulus = directory.clone().relative_to(source_root);
         visit_directory(&in_cumulus, thunder_config).await
     } else {
