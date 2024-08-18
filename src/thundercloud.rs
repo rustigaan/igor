@@ -4,6 +4,7 @@ use std::io::ErrorKind;
 use std::ops::Add;
 use anyhow::{anyhow, bail, Result};
 use std::path::Path;
+use std::pin::pin;
 use ahash::{AHashMap, AHashSet};
 use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
@@ -12,10 +13,12 @@ use serde_yaml::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::fs::{DirBuilder, File, OpenOptions};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
+use tokio_stream::StreamExt;
 use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
+use crate::file_system;
 use crate::file_system::{DirEntry, FileSystem};
 
 pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
@@ -562,7 +565,7 @@ async fn try_visit_directory<DL: DirectoryLocation, T: ThunderConfig>(exists: bo
     if exists {
         let source_root = directory_location.directory(thunder_config);
         let in_cumulus = directory.clone().relative_to(source_root);
-        visit_directory(&in_cumulus, thunder_config).await
+        visit_directory(directory_location, &in_cumulus, thunder_config).await
     } else {
         Ok(void_subtree())
     }
@@ -572,15 +575,18 @@ fn void_subtree() -> (AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>) {
     (AHashMap::new(), AHashSet::new())
 }
 
-async fn visit_directory<T: ThunderConfig>(directory: &AbsolutePath, thunder_config: &T) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+async fn visit_directory<DL: DirectoryLocation, T: ThunderConfig>(directory_location: &DL, directory: &AbsolutePath, thunder_config: &T) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
     trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", &directory, thunder_config.project_root(), thunder_config.invar());
     let mut bolts = AHashMap::new();
     let mut subdirectories = AHashSet::new();
-    let mut entries = tokio::fs::read_dir(directory as &Path).await
+    let file_system = directory_location.file_system();
+    let entries = file_system.read_dir(directory).await
         .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
-    while let Some(entry) = entries.next_entry().await? {
+    let mut entries = pin!(entries);
+    while let Some(entry) = entries.next().await {
+        let entry = entry?;
         trace!("Visit entry: {entry:?}");
-        if entry.file_type().await?.is_dir() {
+        if entry.is_dir().await? {
             if let Some(component) = entry.path().components().last() {
                 let component = SingleComponent::try_new(Path::new(component.as_os_str()))?;
                 subdirectories.insert(component);

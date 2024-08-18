@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::Path;
 use anyhow::anyhow;
 use tokio::fs::DirEntry as TokioDirEntry;
@@ -13,17 +14,29 @@ impl DirEntry for TokioDirEntry {
     fn path(&self) -> PathBuf {
         self.path()
     }
+
+    fn file_name(&self) -> OsString {
+        self.file_name()
+    }
+
+    fn is_dir(&self) -> impl Future<Output = Result<bool>> + Send {
+        async {
+            let file_type = self.file_type().await?;
+            Ok(file_type.is_dir())
+        }
+    }
 }
 
-// #[async_trait::async_trait]
 impl FileSystem for RealFileSystem {
     type DirEntryItem = TokioDirEntry;
 
-    async fn read_dir(&self, directory: &AbsolutePath) -> Result<impl Stream<Item=Result<Self::DirEntryItem>>> {
-        let entries = tokio::fs::read_dir(directory as &Path).await
-            .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
+    fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync>> + Send {
         let directory = directory.clone();
-        Ok(ReadDirStream::new(entries).map(move |item| item.map_err(|e| anyhow!(format!("error traversing {:?}: {:?}", &directory, e)))))
+        async move {
+            let entries = tokio::fs::read_dir(&directory as &Path).await
+                .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
+            Ok(ReadDirStream::new(entries).map(move |item| item.map_err(|e| anyhow!(format!("error traversing {:?}: {:?}", &directory, e)))))
+        }
     }
 }
 
