@@ -1,23 +1,20 @@
+use ahash::{AHashMap, AHashSet};
+use anyhow::{anyhow, bail, Result};
 use std::borrow::Cow;
 use std::hash::Hash;
 use std::ops::Add;
-use anyhow::{anyhow, bail, Result};
 use std::path::Path;
 use std::pin::pin;
-use ahash::{AHashMap, AHashSet};
 use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde_yaml::Value;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines};
-use tokio::fs::File;
-use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
-use crate::file_system::{DirEntry, FileSystem, TargetFile};
+use crate::file_system::{DirEntry, FileSystem, SourceFile, TargetFile};
 
 pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     let thundercloud_directory = thunder_config.thundercloud_directory();
@@ -186,7 +183,11 @@ impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
     }
 }
 
-async fn visit_subtree<T: ThunderConfig, I: InvarConfig>(directory: &RelativePath, thumbs: Thumbs, thunder_config: &T, invar_config: &I) -> Result<()> {
+async fn visit_subtree<TC, IC>(directory: &RelativePath, thumbs: Thumbs, thunder_config: &TC, invar_config: &IC) -> Result<()>
+where
+    TC: ThunderConfig,
+    IC: InvarConfig
+{
     let cumulus_directory_location = CumulusDirectoryLocation(*thunder_config.thundercloud_file_system());
     let (cumulus_bolts, cumulus_subdirectories) =
         try_visit_directory(thumbs.visit_cumulus(), &cumulus_directory_location, thunder_config, directory).await?;
@@ -206,7 +207,11 @@ async fn visit_subtree<T: ThunderConfig, I: InvarConfig>(directory: &RelativePat
     Ok(())
 }
 
-async fn generate_files<T: ThunderConfig, I: InvarConfig>(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>,Vec<Bolt>)>, thunder_config: &T, invar_config: &I) -> Result<()> {
+async fn generate_files<TC, IC>(directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>, Vec<Bolt>)>, thunder_config: &TC, invar_config: &IC) -> Result<()>
+where
+    TC: ThunderConfig,
+    IC: InvarConfig
+{
     let mut bolts = bolts;
     let mut use_config = Cow::Borrowed(invar_config);
     if let Some(dir_bolts) = bolts.remove(".") {
@@ -232,7 +237,11 @@ async fn generate_files<T: ThunderConfig, I: InvarConfig>(directory: &RelativePa
     Ok(())
 }
 
-async fn generate_file<FS: FileSystem, I: InvarConfig>(file_system: &FS, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &I) -> Result<()> {
+async fn generate_file<FS, IC>(file_system: &FS, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IC) -> Result<()>
+where
+    FS: FileSystem,
+    IC: InvarConfig
+{
     if bolts.is_empty() {
         debug!("Skip: {:?}: {:?}", target_path, &bolts);
         return Ok(())
@@ -250,42 +259,46 @@ async fn generate_file<FS: FileSystem, I: InvarConfig>(file_system: &FS, target_
         return Ok(())
     }
     if let Some(target_file) = file_system.open_target(target_path.clone(), invar_config.write_mode()).await? {
-        let tx = target_file.sender();
-        generate_option(option, bolts, invar_config, &tx).await?;
-        let mut target_file = target_file;
-        target_file.close().await?;
+        generate_option(file_system, option, bolts, invar_config, &target_file).await?;
+        let mut target_file_mut = target_file;
+        target_file_mut.close().await?;
     } else {
         debug!("Skip (target exists): {:?}: {:?}: {:?}", target_path, &bolts, &invar_config);
     }
     Ok(())
 }
 
-async fn generate_option<I: InvarConfig>(option: Bolt, fragments: Vec<Bolt>, invar_config: &I, tx: &Sender<String>) -> Result<()> {
+async fn generate_option<FS, IC, TF>(file_system: &FS, option: Bolt, fragments: Vec<Bolt>, invar_config: &IC, target_file: &TF) -> Result<()>
+where
+    FS: FileSystem,
+    IC: InvarConfig,
+    TF: TargetFile
+{
     debug!("Generating option: {:?}: {:?}: {:?}", &option, &fragments, invar_config);
     let source = option.source();
-    let file = File::open(source.as_path()).await?;
-    let buffered_reader = BufReader::new(file);
-    let mut lines = buffered_reader.lines();
-    while let Some(line) = lines.next_line().await? {
+    let mut source_file = file_system.open_source(source.clone()).await?;
+    while let Some(line) = source_file.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
             let feature = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
             let qualifier = captures.name("qualifier").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
             debug!("Found fragment: {:?}: {:?}", &feature, &qualifier);
             if let Some(bracket) = captures.name("bracket") {
                 if bracket.as_str() == "BEGIN " {
-                    skip_to_end_of_fragment(&mut lines, &feature, &qualifier).await?;
+                    skip_to_end_of_fragment(&mut source_file, &feature, &qualifier).await?;
                 }
             }
-            find_and_include_fragment(&feature, &qualifier, tx, &fragments, invar_config).await?;
+            find_and_include_fragment(file_system, &feature, &qualifier, target_file, &fragments, invar_config).await?;
             continue;
         }
-        send_to_writer(&line, invar_config, tx).await?;
+        send_to_writer(&line, invar_config, target_file).await?;
     }
     Ok(())
 }
 
-async fn skip_to_end_of_fragment<T>(lines: &mut Lines<T>, feature: &str, qualifier: &str) -> Result<()>
-where T: AsyncBufRead + Unpin {
+async fn skip_to_end_of_fragment<SF>(lines: &mut SF, feature: &str, qualifier: &str) -> Result<()>
+where
+    SF: SourceFile
+{
     while let Some(fragment_line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
             debug!("Found inner fragment: {:?}", &captures);
@@ -297,13 +310,18 @@ where T: AsyncBufRead + Unpin {
     Ok(())
 }
 
-async fn find_and_include_fragment<I: InvarConfig>(feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &I) -> Result<()> {
+async fn find_and_include_fragment<FS, IC, TF>(file_system: &FS, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+where
+    FS: FileSystem,
+    IC: InvarConfig,
+    TF: TargetFile
+{
     for bolt in fragments {
         if let Bolt::Fragment { bolt_core, qualifier: fragment_qualifier, .. } = bolt {
             let fragment_qualifier = fragment_qualifier.as_ref().map(ToOwned::to_owned).unwrap_or("".to_string());
             if bolt_core.feature_name == feature && fragment_qualifier == qualifier {
                 debug!("Found fragment to include: {:?}", bolt);
-                include_fragment(bolt, feature, qualifier, tx, fragments, invar_config).await?;
+                include_fragment(file_system, bolt, feature, qualifier, target_file, fragments, invar_config).await?;
                 break;
             }
         }
@@ -311,20 +329,23 @@ async fn find_and_include_fragment<I: InvarConfig>(feature: &str, qualifier: &st
     Ok(())
 }
 
-async fn include_fragment<I: InvarConfig>(fragment: &Bolt, feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &I) -> Result<()> {
-    let source = fragment.source();
-    let file = File::open(source.as_path()).await?;
-    let buffered_reader = BufReader::new(file);
-    let mut lines = buffered_reader.lines();
-    while let Some(line) = lines.next_line().await? {
+async fn include_fragment<FS, TF, IC>(file_system: &FS, fragment: &Bolt, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+where
+    FS: FileSystem,
+    TF: TargetFile,
+    IC: InvarConfig
+{
+    let source = fragment.source().clone();
+    let mut source_file = file_system.open_source(source).await?;
+    while let Some(line) = source_file.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
             let placeholder_feature = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
             let placeholder_qualifier = captures.name("qualifier").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
             debug!("Found placeholder: {:?}: {:?}", &feature, &qualifier);
             if let Some(bracket) = captures.name("bracket") {
                 if bracket.as_str() == "BEGIN " && placeholder_feature == feature && placeholder_qualifier == qualifier {
-                    send_to_writer(&line, invar_config, tx).await?;
-                    copy_to_end_of_fragment(&mut lines, &feature, &qualifier, tx, fragments, invar_config).await?;
+                    send_to_writer(&line, invar_config, target_file).await?;
+                    copy_to_end_of_fragment(file_system, &mut source_file, &feature, &qualifier, target_file, fragments, invar_config).await?;
                 }
             }
             return Ok(());
@@ -334,13 +355,18 @@ async fn include_fragment<I: InvarConfig>(fragment: &Bolt, feature: &str, qualif
     Ok(())
 }
 
-async fn copy_to_end_of_fragment<T, I: InvarConfig>(lines: &mut Lines<T>, feature: &str, qualifier: &str, tx: &Sender<String>, fragments: &Vec<Bolt>, invar_config: &I) -> Result<()>
-    where T: AsyncBufRead + Unpin {
+async fn copy_to_end_of_fragment<FS, SF, TF, IC>(file_system: &FS, lines: &mut SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+where
+    FS: FileSystem,
+    SF: SourceFile,
+    TF: TargetFile,
+    IC: InvarConfig
+{
     while let Some(fragment_line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
             debug!("Found inner fragment: {:?}", &captures);
             if is_matching_end(&captures, feature, qualifier) {
-                send_to_writer(&fragment_line, invar_config, tx).await?;
+                send_to_writer(&fragment_line, invar_config, target_file).await?;
                 break;
             } else {
                 if let Some(bracket) = captures.name("bracket") {
@@ -348,11 +374,11 @@ async fn copy_to_end_of_fragment<T, I: InvarConfig>(lines: &mut Lines<T>, featur
                         skip_to_end_of_fragment(lines, &feature, &qualifier).await?;
                     }
                 }
-                Box::pin(find_and_include_fragment(&feature, &qualifier, tx, fragments, invar_config)).await?;
+                Box::pin(find_and_include_fragment(file_system, &feature, &qualifier, target_file, fragments, invar_config)).await?;
                 continue;
             }
         }
-        send_to_writer(&fragment_line, invar_config, tx).await?;
+        send_to_writer(&fragment_line, invar_config, target_file).await?;
     }
     Ok(())
 }
@@ -372,18 +398,23 @@ fn is_matching_end(captures: &Captures, feature: &str, qualifier: &str) -> bool 
             return true;
         }
     }
-    return false;
+
+    false
 }
 
-async fn send_to_writer<I: InvarConfig>(line: &str, invar_config: &I, tx: &Sender<String>) -> Result<()> {
+async fn send_to_writer<IC, TF>(line: &str, invar_config: &IC, target_file: &TF) -> Result<()>
+where
+    IC: InvarConfig,
+    TF: TargetFile
+{
     let mut line = interpolate(&line, invar_config);
     debug!("Send to writer: {:?}", line);
     line.push('\n');
-    tx.send(line).await?;
+    target_file.write_line(line).await?;
     Ok(())
 }
 
-fn interpolate<I: InvarConfig>(line: &str, invar_config: &I) -> String {
+fn interpolate<IC: InvarConfig>(line: &str, invar_config: &IC) -> String {
     let mut result = String::new();
     let properties = invar_config.props();
     let replacements = properties.as_ref();
@@ -410,7 +441,10 @@ fn interpolate<I: InvarConfig>(line: &str, invar_config: &I) -> String {
     result
 }
 
-async fn update_invar_config<'a, I: InvarConfig>(invar_config: &'a I, bolts: &Vec<Bolt>) -> Result<Cow<'a, I>> {
+async fn update_invar_config<'a, IC>(invar_config: &'a IC, bolts: &Vec<Bolt>) -> Result<Cow<'a, IC>>
+where
+    IC: InvarConfig
+{
     let mut use_config = Cow::Borrowed(invar_config);
     for bolt in bolts {
         debug!("Bolt kind: {:?}", bolt.kind_name());
@@ -434,12 +468,18 @@ async fn get_invar_config(source: &AbsolutePath) -> Result<impl InvarConfig> {
     Ok(config)
 }
 
-fn combine_and_filter_bolt_lists<T: ThunderConfig>(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>, thunder_config: &T) -> (Option<Bolt>, Vec<Bolt>) {
+fn combine_and_filter_bolt_lists<TC>(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>, thunder_config: &TC) -> (Option<Bolt>, Vec<Bolt>)
+where
+    TC: ThunderConfig
+{
     let combined = combine_bolt_lists(cumulus_bolts_list, invar_bolts_list);
     filter_options(&combined, thunder_config)
 }
 
-fn filter_options<T: ThunderConfig>(bolt_list: &Vec<Bolt>, thunder_config: &T) -> (Option<Bolt>, Vec<Bolt>) {
+fn filter_options<TC>(bolt_list: &Vec<Bolt>, thunder_config: &TC) -> (Option<Bolt>, Vec<Bolt>)
+where
+    TC: ThunderConfig
+{
     let mut features = AHashSet::new();
     features.insert("@");
     for feature in thunder_config.use_thundercloud().features() {
@@ -464,7 +504,11 @@ fn filter_options<T: ThunderConfig>(bolt_list: &Vec<Bolt>, thunder_config: &T) -
     (first_option, fragments)
 }
 
-async fn visit_subdirectories<T: ThunderConfig,I: InvarConfig>(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &T, invar_config: &I) -> Result<()> {
+async fn visit_subdirectories<TC, IC>(directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, thunder_config: &TC, invar_config: &IC) -> Result<()>
+where
+    TC: ThunderConfig,
+    IC: InvarConfig
+{
     let mut invar_subdirectories = invar_subdirectories;
     for path in cumulus_subdirectories {
         let subdirectory_thumbs = if let Some(_) = invar_subdirectories.get(&path) {
@@ -521,7 +565,11 @@ fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bol
     result
 }
 
-async fn try_visit_directory<DL: DirectoryLocation, T: ThunderConfig>(exists: bool, directory_location: &DL, thunder_config: &T, directory: &RelativePath) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+async fn try_visit_directory<DL, TC>(exists: bool, directory_location: &DL, thunder_config: &TC, directory: &RelativePath) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)>
+where
+    DL: DirectoryLocation,
+    TC: ThunderConfig
+{
     if exists {
         let source_root = directory_location.directory(thunder_config);
         let in_cumulus = directory.clone().relative_to(source_root);
@@ -535,7 +583,11 @@ fn void_subtree() -> (AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>) {
     (AHashMap::new(), AHashSet::new())
 }
 
-async fn visit_directory<DL: DirectoryLocation, T: ThunderConfig>(directory_location: &DL, directory: &AbsolutePath, thunder_config: &T) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)> {
+async fn visit_directory<DL, TC>(directory_location: &DL, directory: &AbsolutePath, thunder_config: &TC) -> Result<(AHashMap<String,Vec<Bolt>>, AHashSet<SingleComponent>)>
+where
+    DL: DirectoryLocation,
+    TC: ThunderConfig
+{
     trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", &directory, thunder_config.project_root(), thunder_config.invar());
     let mut bolts = AHashMap::new();
     let mut subdirectories = AHashSet::new();

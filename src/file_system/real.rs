@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::Path;
 use anyhow::{Result,anyhow};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::fs::{DirBuilder, DirEntry as TokioDirEntry, File, OpenOptions};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
@@ -19,6 +19,11 @@ struct RealTargetFile {
     file_path: AbsolutePath,
     tx: Sender<String>,
     join_handle: Option<JoinHandle<Result<()>>>
+}
+
+struct RealSourceFile {
+    file_path: AbsolutePath,
+    lines: Lines<BufReader<File>>
 }
 
 impl DirEntry for TokioDirEntry {
@@ -84,6 +89,16 @@ impl FileSystem for RealFileSystem {
             Ok(None)
         }
     }
+
+    async fn open_source(&self, source_path: AbsolutePath) -> Result<impl SourceFile> {
+        let file = File::open(source_path.as_path()).await?;
+        let buffered_reader = BufReader::new(file);
+        let lines = buffered_reader.lines();
+        Ok(RealSourceFile {
+            file_path: source_path.clone(),
+            lines
+        })
+    }
 }
 
 async fn file_writer(rx: Receiver<String>, mut target: File) -> Result<()> {
@@ -95,8 +110,8 @@ async fn file_writer(rx: Receiver<String>, mut target: File) -> Result<()> {
 }
 
 impl TargetFile for RealTargetFile {
-    fn sender(&self) -> Sender<String> {
-        self.tx.clone()
+    async fn write_line<S: Into<String> + Send>(&self, line: S) -> Result<()> {
+        self.tx.send(line.into()).await.map_err(|e| anyhow!(format!("Error wirting line to {:?}: {:?}", &self.file_path, e)))
     }
 
     async fn close(&mut self) -> Result<()> {
@@ -105,6 +120,12 @@ impl TargetFile for RealTargetFile {
         } else {
             Err(anyhow!("Closed already: {:?}", &self.file_path))
         }
+    }
+}
+
+impl SourceFile for RealSourceFile {
+    async fn next_line(&mut self) -> Result<Option<String>> {
+        self.lines.next_line().await.map_err(|e| anyhow!(format!("Error fetching next line from: {:?}: {:?}", &self.file_path, e)))
     }
 }
 
