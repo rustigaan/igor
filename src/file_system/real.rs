@@ -17,7 +17,7 @@ struct RealFileSystem {}
 
 struct RealTargetFile {
     file_path: AbsolutePath,
-    tx: Sender<String>,
+    tx: Option<Sender<String>>,
     join_handle: Option<JoinHandle<Result<()>>>
 }
 
@@ -82,7 +82,7 @@ impl FileSystem for RealFileSystem {
             let join_handle = tokio::task::spawn(file_writer(rx, file));
             Ok(Some(RealTargetFile {
                 file_path: target_file,
-                tx,
+                tx: Some(tx),
                 join_handle: Some(join_handle),
             }))
         } else {
@@ -111,11 +111,17 @@ async fn file_writer(rx: Receiver<String>, mut target: File) -> Result<()> {
 
 impl TargetFile for RealTargetFile {
     async fn write_line<S: Into<String> + Send>(&self, line: S) -> Result<()> {
-        self.tx.send(line.into()).await.map_err(|e| anyhow!(format!("Error wirting line to {:?}: {:?}", &self.file_path, e)))
+        if let Some(tx) = &self.tx {
+            tx.send(line.into() + "\n").await.map_err(|e| anyhow!(format!("Error wirting line to {:?}: {:?}", &self.file_path, e)))
+        } else {
+            Err(anyhow!(format!("Target file already closed: {:?}", &self.file_path)))
+        }
     }
 
     async fn close(&mut self) -> Result<()> {
         if let Some(join_handle) = &mut self.join_handle.take() {
+            let tx = self.tx.take();
+            drop(tx);
             join_handle.await?.map_err(|e| anyhow!(format!("Error closing {:?}: {:?}", &self.file_path, e)))
         } else {
             Err(anyhow!("Closed already: {:?}", &self.file_path))
@@ -149,8 +155,7 @@ mod test {
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
 
         // When
-        let entries = fs.read_dir(&path).await?;
-        let mut entries = pin!(entries);
+        let mut entries = pin!(fs.read_dir(&path).await?);
         let entry = entries.next().await;
 
         // Then
@@ -165,24 +170,85 @@ mod test {
         let tmp_dir = TempDir::new()?;
         let fs = real_file_system();
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
-        let file_path = AbsolutePath::new(PathBuf::from("empty"), &path);
+        let file_path = AbsolutePath::new(PathBuf::from("non-empty"), &path);
         File::create(&file_path.as_path()).await?;
 
         // When
-        let entries = fs.read_dir(&path).await?;
-        let mut entries = pin!(entries);
+        let mut entries = pin!(fs.read_dir(&path).await?);
         let entry = entries.next().await;
 
         // Then
         assert_eq!(entry.is_some(), true);
         if let Some(result) = entry {
             let dir_entry = result?;
+            assert_eq!(dir_entry.file_name(), "non-empty");
+            assert_eq!(dir_entry.is_dir().await?, false);
             let path: PathBuf = dir_entry.path();
             if let Some(last) = path.components().last() {
-                assert_eq!(last.as_os_str(), OsStr::from_bytes("empty".as_bytes()));
+                assert_eq!(last.as_os_str(), OsStr::from_bytes("non-empty".as_bytes()));
             }
         }
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_and_read() -> Result<()> {
+        let tmp_dir = TempDir::new()?;
+        let fs = real_file_system();
+        let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
+        let file_path = AbsolutePath::new(PathBuf::from("content"), &path);
+
+        let target_file = fs.open_target(file_path.clone(), WriteMode::Overwrite).await?.unwrap();
+        target_file.write_line("First line.").await?;
+        target_file.write_line("Second line.").await?;
+        let mut target_file_mut = target_file;
+        target_file_mut.close().await?;
+        if let Ok(_) = target_file_mut.write_line("Post close.").await {
+            assert_eq!(true, false);
+        }
+        if let Ok(_) = target_file_mut.close().await {
+            assert_eq!(true, false);
+        }
+
+        let mut source_file = fs.open_source(file_path).await?;
+        assert_eq!(source_file.next_line().await?, Some("First line.".to_string()));
+        assert_eq!(source_file.next_line().await?, Some("Second line.".to_string()));
+        assert_eq!(source_file.next_line().await?, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ignore() -> Result<()> {
+        let tmp_dir = TempDir::new()?;
+        let fs = real_file_system();
+        let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
+        let file_path = AbsolutePath::new(PathBuf::from("content"), &path);
+
+        if let Some(_) = fs.open_target(file_path.clone(), WriteMode::Ignore).await? {
+            assert_eq!(true, false);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_new() -> Result<()> {
+        let tmp_dir = TempDir::new()?;
+        let fs = real_file_system();
+        let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
+        let file_path = AbsolutePath::new(PathBuf::from("content"), &path);
+
+        if let Some(target_file) = fs.open_target(file_path.clone(), WriteMode::WriteNew).await? {
+            target_file.write_line("Some line.").await?;
+            let mut target_file_mut = target_file;
+            target_file_mut.close().await?;
+        } else {
+            assert_eq!(true, false);
+        }
+        if let Some(_) = fs.open_target(file_path.clone(), WriteMode::WriteNew).await? {
+            assert_eq!(true, false);
+        }
         Ok(())
     }
 }
