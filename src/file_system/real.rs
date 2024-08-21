@@ -1,14 +1,25 @@
 use std::ffi::OsString;
+use std::io::ErrorKind;
 use std::path::Path;
-use anyhow::anyhow;
-use tokio::fs::DirEntry as TokioDirEntry;
+use anyhow::{Result,anyhow};
+use tokio::io::AsyncWriteExt;
+use tokio::fs::{DirBuilder, DirEntry as TokioDirEntry, File, OpenOptions};
+use tokio::sync::mpsc::{channel, Receiver};
+use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReadDirStream;
+use crate::config_model::WriteMode;
 use super::*;
 use crate::path::AbsolutePath;
 
 #[derive(Debug, Copy, Clone)]
 struct RealFileSystem {}
+
+struct RealTargetFile {
+    file_path: AbsolutePath,
+    tx: Sender<String>,
+    join_handle: Option<JoinHandle<Result<()>>>
+}
 
 impl DirEntry for TokioDirEntry {
     fn path(&self) -> PathBuf {
@@ -19,23 +30,80 @@ impl DirEntry for TokioDirEntry {
         self.file_name()
     }
 
-    fn is_dir(&self) -> impl Future<Output = Result<bool>> + Send {
-        async {
-            let file_type = self.file_type().await?;
-            Ok(file_type.is_dir())
-        }
+    async fn is_dir(&self) -> Result<bool> {
+        let file_type = self.file_type().await?;
+        Ok(file_type.is_dir())
     }
 }
 
 impl FileSystem for RealFileSystem {
     type DirEntryItem = TokioDirEntry;
 
-    fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync>> + Send {
-        let directory = directory.clone();
-        async move {
-            let entries = tokio::fs::read_dir(&directory as &Path).await
-                .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
-            Ok(ReadDirStream::new(entries).map(move |item| item.map_err(|e| anyhow!(format!("error traversing {:?}: {:?}", &directory, e)))))
+    async fn read_dir(&self, directory: &AbsolutePath) -> Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync> {
+        let entries = tokio::fs::read_dir(&directory as &Path).await
+            .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
+        Ok(ReadDirStream::new(entries).map(move |item| item.map_err(|e| anyhow!(format!("error traversing {:?}: {:?}", &directory, e)))))
+    }
+
+    async fn open_target(&self, target_file: AbsolutePath, write_mode: WriteMode) -> Result<Option<impl TargetFile>> {
+        let mut open_options = OpenOptions::new().read(false).write(true).to_owned();
+        let open_options = match write_mode {
+            WriteMode::Ignore => {
+                return Ok(None)
+            },
+            WriteMode::WriteNew => open_options.create_new(true),
+            WriteMode::Overwrite => open_options.create(true).truncate(true),
+        };
+
+        let mut target_dir = target_file.to_path_buf();
+        target_dir.pop();
+        let mut dir_builder = DirBuilder::new();
+        dir_builder.recursive(true);
+        dir_builder.create(target_dir.as_path()).await?;
+
+        let result = open_options.open(target_file.as_path()).await;
+        let file_option = match result {
+            Ok(file) => Some(file),
+            Err(error) => {
+                if let ErrorKind::AlreadyExists = error.kind() {
+                    None
+                } else {
+                    return Err(error.into())
+                }
+            }
+        };
+        if let Some(file) = file_option {
+            let (tx, rx) = channel(10);
+            let join_handle = tokio::task::spawn(file_writer(rx, file));
+            Ok(Some(RealTargetFile {
+                file_path: target_file,
+                tx,
+                join_handle: Some(join_handle),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+async fn file_writer(rx: Receiver<String>, mut target: File) -> Result<()> {
+    let mut rx = rx;
+    while let Some(line) = rx.recv().await {
+        target.write_all(line.as_bytes()).await?;
+    }
+    Ok(())
+}
+
+impl TargetFile for RealTargetFile {
+    fn sender(&self) -> Sender<String> {
+        self.tx.clone()
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        if let Some(join_handle) = &mut self.join_handle.take() {
+            join_handle.await?.map_err(|e| anyhow!(format!("Error closing {:?}: {:?}", &self.file_path, e)))
+        } else {
+            Err(anyhow!("Closed already: {:?}", &self.file_path))
         }
     }
 }
@@ -77,7 +145,7 @@ mod test {
         let fs = real_file_system();
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
         let file_path = AbsolutePath::new(PathBuf::from("empty"), &path);
-        tokio::fs::File::create(&file_path.as_path()).await?;
+        File::create(&file_path.as_path()).await?;
 
         // When
         let entries = fs.read_dir(&path).await?;
