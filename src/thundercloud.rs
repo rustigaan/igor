@@ -188,10 +188,10 @@ where
     TC: ThunderConfig,
     IC: InvarConfig
 {
-    let cumulus_directory_location = CumulusDirectoryLocation(*thunder_config.thundercloud_file_system());
+    let cumulus_directory_location = CumulusDirectoryLocation(thunder_config.thundercloud_file_system().clone());
     let (cumulus_bolts, cumulus_subdirectories) =
         try_visit_directory(thumbs.visit_cumulus(), &cumulus_directory_location, thunder_config, directory).await?;
-    let invar_directory_location = InvarDirectoryLocation(*thunder_config.project_file_system());
+    let invar_directory_location = InvarDirectoryLocation(thunder_config.project_file_system().clone());
     let (invar_bolts, invar_subdirectories) =
         try_visit_directory(thumbs.visit_invar(), &invar_directory_location, thunder_config, directory).await?;
 

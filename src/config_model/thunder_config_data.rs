@@ -24,8 +24,8 @@ impl<TFS: FileSystem, PFS: FileSystem> ThunderConfigData<TFS, PFS> {
             cumulus,
             invar,
             project,
-            thundercloud_file_system: *thundercloud_file_system,
-            project_file_system: *project_file_system,
+            thundercloud_file_system: thundercloud_file_system.clone(),
+            project_file_system: project_file_system.clone(),
         }
     }
 }
