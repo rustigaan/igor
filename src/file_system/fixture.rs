@@ -5,7 +5,7 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use anyhow::anyhow;
 use async_stream::stream;
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use serde::{Deserialize, Deserializer};
 use serde::de::{MapAccess, Visitor};
 use stringreader::StringReader;
@@ -101,7 +101,7 @@ impl FileSystem for FixtureFileSystem {
             let file_name = file_name_ref.to_os_string();
             match &current.content {
                 DirFixtureContent { entries, .. } => {
-                    let entries_content = entries.write().await;
+                    let mut entries_content = entries.write().await;
                     if let Some(file_entry) = entries_content.get(&file_name.clone()) {
                         if let FileFixtureContent {lines,..} = &file_entry.content {
                             if write_mode == Overwrite {
@@ -126,7 +126,6 @@ impl FileSystem for FixtureFileSystem {
                             is_dir: false,
                             content
                         });
-                        let mut entries_content = entries.write().await;
                         entries_content.insert(file_name, new_dir_entry.clone());
                         Ok(Some(new_dir_entry))
                     }
@@ -142,7 +141,7 @@ impl FileSystem for FixtureFileSystem {
         let current = self.find_parent_entry(&file_path).await?;
         if let Some(file_name_ref) = file_path.file_name() {
             let file_name = file_name_ref.to_os_string();
-            debug!("Open source: {:?}: {:?}", &file_name, &current);
+            trace!("Open source: {:?}: {:?}", &file_name, &current);
             if let DirFixtureContent { entries, .. } = &current.content {
                 let entries_content = entries.read().await;
                 if let Some(file_entry) = entries_content.get(&file_name.clone()) {
@@ -292,7 +291,7 @@ fn convert(parent_path: &AbsolutePath, file_name: &str, data: Box<FixtureData>) 
             let entry = convert(&this_path, &entry_name, entry);
             content.insert(OsString::from(entry_name), Arc::new(entry));
         }
-        debug!("Convert directory: {:?}", &content);
+        trace!("Convert directory: {:?}", &content);
         FixtureEntry {
             file_name: OsString::from(file_name),
             path: this_path.clone(),
@@ -305,7 +304,7 @@ fn convert(parent_path: &AbsolutePath, file_name: &str, data: Box<FixtureData>) 
         for line in body {
             lines.push(line.unwrap())
         }
-        debug!("Convert file: {:?}: {:?}: {:?}", &this_path, file_name, &lines);
+        debug!("Convert file: {:?}: {:?}: {:?}: {:?}", &this_path, file_name, lines.len(), lines.iter().take(2).collect::<Vec<&String>>());
         FixtureEntry {
             file_name: OsString::from(file_name),
             path: this_path.clone(),
@@ -330,11 +329,11 @@ pub fn fixture_file_system<R: Read>(reader: R) -> Result<impl FileSystem> {
 #[cfg(test)]
 mod test {
     use indoc::indoc;
-    use log::debug;
     use stringreader::StringReader;
+    use test_log::test;
     use super::*;
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn open_source() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
@@ -353,11 +352,20 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn open_target() -> Result<()> {
+    #[test(tokio::test)]
+    async fn open_target_overwrite_existing() -> Result<()> {
+        open_target_overwrite("top-dir/sub-dir/file").await
+    }
+
+    #[test(tokio::test)]
+    async fn open_target_overwrite_new() -> Result<()> {
+        open_target_overwrite("top-dir/sub-dir/new-file").await
+    }
+
+    async fn open_target_overwrite(file: &str) -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
-        let file_path = to_absolute_path("top-dir/sub-dir/file");
+        let file_path = to_absolute_path(file);
 
         // When
         if let Some(target_file) = fs.open_target(file_path.clone(), Overwrite).await? {
@@ -394,6 +402,7 @@ mod test {
                                         body: |
                                             First line
                                             Second line
+                                            Third line
                                     empty-dir: {}
                                     empty-file:
                                         body: ""
@@ -410,7 +419,7 @@ mod test {
                         body: |
                             echo "Shell!"
             "#};
-        debug!("YAML: [{}]", &yaml);
+        trace!("YAML: [{}]", &yaml);
 
         let yaml_source = StringReader::new(yaml);
         Ok(fixture_file_system(yaml_source)?)
