@@ -189,6 +189,7 @@ impl FixtureFileSystem {
             Ok(self.data.clone())
         }
     }
+
     async fn find_entry(&self, dir_path: &AbsolutePath) -> Result<Arc<FixtureEntry>> {
         let mut current = self.data.clone();
         let mut current_path = PathBuf::new();
@@ -236,21 +237,23 @@ impl FixtureFileSystem {
     }
 }
 
-struct FixtureDataEntries(AHashMap<String,Box<FixtureData>>);
-
-#[derive(Deserialize)]
-struct FixtureData {
-    entries: Option<FixtureDataEntries>,
-    body: Option<String>,
+#[derive(Deserialize,Debug)]
+#[serde(untagged)]
+enum FixtureEnum {
+    Dir(FixtureDirectory),
+    File(String),
 }
 
-struct FixtureDataEntriesVisitor;
+#[derive(Debug)]
+struct FixtureDirectory(AHashMap<String,Box<FixtureEnum>>);
 
-impl<'de> Visitor<'de> for FixtureDataEntriesVisitor {
-    type Value = FixtureDataEntries;
+struct FixtureDirectoryVisitor;
+
+impl<'de> Visitor<'de> for FixtureDirectoryVisitor {
+    type Value = FixtureDirectory;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a map of fixture dat entries")
+        formatter.write_str("a map of fixture enum entries")
     }
 
     fn visit_map<M>(self, mut access: M) -> std::result::Result<Self::Value, M::Error>
@@ -261,77 +264,103 @@ impl<'de> Visitor<'de> for FixtureDataEntriesVisitor {
         while let Some((key, value)) = access.next_entry()? {
             map.insert(key, value);
         }
-        Ok(FixtureDataEntries(map))
+        Ok(FixtureDirectory(map))
     }
 }
 
-impl<'de> Deserialize<'de> for FixtureDataEntries {
+impl<'de> Deserialize<'de> for FixtureDirectory {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+        D: Deserializer<'de>
     {
-        deserializer.deserialize_map(FixtureDataEntriesVisitor)
+        deserializer.deserialize_map(FixtureDirectoryVisitor)
     }
 }
 
-impl From<FixtureData> for FixtureFileSystem {
-    fn from(_value: FixtureData) -> Self {
+impl From<FixtureEnum> for FixtureFileSystem {
+    fn from(value: FixtureEnum) -> Self {
         let root = AbsolutePath::try_new(PathBuf::from("/")).unwrap();
-        let root_entry = convert(&root, &"/", Box::new(_value));
+        let root_entry = convert_enum(&root, &"/", Box::new(value));
         FixtureFileSystem { data: Arc::new(root_entry) }
     }
 }
 
-fn convert(parent_path: &AbsolutePath, file_name: &str, data: Box<FixtureData>) -> FixtureEntry {
-    debug!("Convert: {:?}", file_name);
+fn convert_enum(parent_path: &AbsolutePath, file_name: &str, data: Box<FixtureEnum>) -> FixtureEntry {
     let this_path = AbsolutePath::new(PathBuf::from(file_name), &parent_path);
-    if let Some(entries) = data.entries {
-        let mut content = AHashMap::new();
-        for (entry_name, entry) in entries.0 {
-            let entry = convert(&this_path, &entry_name, entry);
-            content.insert(OsString::from(entry_name), Arc::new(entry));
-        }
-        trace!("Convert directory: {:?}", &content);
-        FixtureEntry {
-            file_name: OsString::from(file_name),
-            path: this_path.clone(),
-            is_dir: true,
-            content: DirFixtureContent { entries: RwLock::new(content) },
-        }
-    } else if let Some(body) = data.body {
-        let body = BufReader::new(StringReader::new(&body)).lines();
-        let mut lines = Vec::new();
-        for line in body {
-            lines.push(line.unwrap())
-        }
-        debug!("Convert file: {:?}: {:?}: {:?}: {:?}", &this_path, file_name, lines.len(), lines.iter().take(2).collect::<Vec<&String>>());
-        FixtureEntry {
-            file_name: OsString::from(file_name),
-            path: this_path.clone(),
-            is_dir: false,
-            content: FileFixtureContent { lines: RwLock::new(lines) },
-        }
-    } else {
-        FixtureEntry {
-            file_name: OsString::from(file_name),
-            path: this_path.clone(),
-            is_dir: true,
-            content: DirFixtureContent { entries: RwLock::new(AHashMap::new()) },
-        }
+    match *data {
+        FixtureEnum::File(body) => {
+            let body_iter = BufReader::new(StringReader::new(&body)).lines();
+            let mut lines = Vec::new();
+            for line in body_iter {
+                lines.push(line.unwrap())
+            }
+            FixtureEntry {
+                file_name: OsString::from(file_name),
+                path: this_path,
+                is_dir: false,
+                content: FileFixtureContent { lines: RwLock::new(lines) },
+            }
+        },
+        FixtureEnum::Dir(entries) => {
+            let mut content = AHashMap::new();
+            for (entry_name, entry) in entries.0 {
+                let entry = convert_enum(&this_path, &entry_name, entry);
+                content.insert(OsString::from(entry_name), Arc::new(entry));
+            }
+            trace!("Convert directory: {:?}", &content);
+            FixtureEntry {
+                file_name: OsString::from(file_name),
+                path: this_path.clone(),
+                is_dir: true,
+                content: DirFixtureContent { entries: RwLock::new(content) },
+            }
+        },
     }
 }
 
 pub fn fixture_file_system<R: Read>(reader: R) -> Result<impl FileSystem> {
-    let data : FixtureData = serde_yaml::from_reader(reader)?;
+    let data : FixtureEnum = serde_yaml::from_reader(reader)?;
+    debug!("File system data: {:?}", data);
     Ok::<FixtureFileSystem, anyhow::Error>(data.into())
 }
 
 #[cfg(test)]
 mod test {
+    use std::pin::pin;
     use indoc::indoc;
     use stringreader::StringReader;
     use test_log::test;
+    use tokio_stream::StreamExt;
     use super::*;
+
+    #[test]
+    fn test_create_test_fixture_file_system() -> Result<()> {
+        let fs = create_test_fixture_file_system()?;
+        debug!("Improved test fixture file-system: {:?}", fs);
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn read_dir() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let root = AbsolutePath::try_new(PathBuf::from("/"))?;
+        let dir_path = AbsolutePath::new(PathBuf::from("top-dir/other-dir"), &root);
+
+        // When
+        let mut dir_stream = pin!(fs.read_dir(&dir_path).await?);
+
+        // Then
+        if let Some(entry_result) = dir_stream.next().await {
+            let entry = entry_result?;
+            assert_eq!(OsString::from("file"), entry.file_name());
+            assert_eq!(OsString::from("/top-dir/other-dir/file").as_os_str(), entry.path().as_os_str());
+        } else {
+            assert!(false, "No entry found")
+        }
+
+        Ok(())
+    }
 
     #[test(tokio::test)]
     async fn open_source() -> Result<()> {
@@ -393,31 +422,20 @@ mod test {
     fn create_test_fixture_file_system() -> Result<impl FileSystem> {
         let yaml = indoc! {r#"
                 ---
-                entries:
-                    top-dir:
-                        entries:
-                            sub-dir:
-                                entries:
-                                    file:
-                                        body: |
-                                            First line
-                                            Second line
-                                            Third line
-                                    empty-dir: {}
-                                    empty-file:
-                                        body: ""
-                            other-dir:
-                                entries:
-                                    file:
-                                        body: |
-                                            Something completely different:
-                                            The Larch
-                            sibling-file:
-                                body: |
-                                    Foo
-                    ".profile":
-                        body: |
-                            echo "Shell!"
+                top-dir:
+                    sub-dir:
+                        file: |
+                            First line
+                            Second line
+                            Third line
+                        empty-dir: {}
+                        empty-file: ""
+                    other-dir:
+                        file: |
+                            Something completely different:
+                            The Larch
+                    sibling-file: Foo
+                ".profile": echo "Shell!"
             "#};
         trace!("YAML: [{}]", &yaml);
 
