@@ -103,18 +103,18 @@ impl FileSystem for FixtureFileSystem {
                 DirFixtureContent { entries, .. } => {
                     let mut entries_content = entries.write().await;
                     if let Some(file_entry) = entries_content.get(&file_name.clone()) {
-                        if let FileFixtureContent {lines,..} = &file_entry.content {
-                            if write_mode == Overwrite {
+                        if write_mode == Overwrite {
+                            if let FileFixtureContent { lines, .. } = &file_entry.content {
                                 {
                                     let mut lines_content = lines.write().await;
                                     lines_content.truncate(0)
                                 }
                                 Ok(Some(file_entry.clone()))
                             } else {
-                                Ok(None)
+                                Err(anyhow!(format!("Trying to write lines to a directory: {:?}", file_path)))
                             }
                         } else {
-                            Err(anyhow!(format!("Trying to write lines to a directory: {:?}", file_path)))
+                            Ok(None)
                         }
                     } else {
                         let content = FileFixtureContent{
@@ -327,10 +327,12 @@ pub fn fixture_file_system<R: Read>(reader: R) -> Result<impl FileSystem> {
 #[cfg(test)]
 mod test {
     use std::pin::pin;
+    use anyhow::bail;
     use indoc::indoc;
     use stringreader::StringReader;
     use test_log::test;
     use tokio_stream::StreamExt;
+    use crate::config_model::WriteMode::WriteNew;
     use super::*;
 
     #[test]
@@ -344,20 +346,20 @@ mod test {
     async fn read_dir() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
-        let root = AbsolutePath::try_new(PathBuf::from("/"))?;
-        let dir_path = AbsolutePath::new(PathBuf::from("top-dir/other-dir"), &root);
+
+        let file_str = "file";
+        let parent_str = "top-dir/other-dir";
+        let path_os_string = OsString::from("/".to_string() + parent_str + "/" + file_str);
+        let parent = to_absolute_path(parent_str);
 
         // When
-        let mut dir_stream = pin!(fs.read_dir(&dir_path).await?);
+        let mut dir_stream = pin!(fs.read_dir(&parent).await?);
 
         // Then
-        if let Some(entry_result) = dir_stream.next().await {
-            let entry = entry_result?;
-            assert_eq!(OsString::from("file"), entry.file_name());
-            assert_eq!(OsString::from("/top-dir/other-dir/file").as_os_str(), entry.path().as_os_str());
-        } else {
-            assert!(false, "No entry found")
-        }
+        let Some(entry_result) = dir_stream.next().await else { bail!("No entries found") };
+        let entry = entry_result?;
+        assert_eq!(OsString::from("file"), entry.file_name());
+        assert_eq!(path_os_string.as_os_str(), entry.path().as_os_str());
 
         Ok(())
     }
@@ -372,11 +374,13 @@ mod test {
         let mut source_file = fs.open_source(AbsolutePath::new(PathBuf::from("top-dir/sub-dir/file"), &root)).await?;
 
         // Then
-        if let Some(line) = source_file.next_line().await? {
-            assert_eq!(&line, "First line");
-        } else {
-            assert!(false);
-        }
+        let Some(first_line) = source_file.next_line().await? else { bail!("File is empty") };
+        assert_eq!(&first_line, "First line");
+        let Some(second_line) = source_file.next_line().await? else { bail!("File is empty") };
+        assert_eq!(&second_line, "Second line");
+        let Some(third_line) = source_file.next_line().await? else { bail!("File is empty") };
+        assert_eq!(&third_line, "Third line");
+        assert!(source_file.next_line().await?.is_none());
 
         Ok(())
     }
@@ -397,22 +401,127 @@ mod test {
         let file_path = to_absolute_path(file);
 
         // When
-        if let Some(target_file) = fs.open_target(file_path.clone(), Overwrite).await? {
-            target_file.write_line("Replacement").await?;
-        } else {
-            assert!(false, "Could not open target");
-        }
+        let Some(mut target_file) = fs.open_target(file_path.clone(), Overwrite).await? else { bail!("Could not open target") };
+        target_file.write_line("Replacement").await?;
+        target_file.close().await?;
 
         // Then
         let mut source_file = fs.open_source(file_path).await?;
-        if let Some(line) = source_file.next_line().await? {
-            assert_eq!(&line, "Replacement");
-        } else {
-            assert!(false, "New file is empty");
-        }
+        let Some(line) = source_file.next_line().await? else { bail!("New file is empty") };
+        assert_eq!(&line, "Replacement");
 
         Ok(())
     }
+
+    #[test(tokio::test)]
+    async fn open_target_dir_overwrite() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+
+        let parent_str = "top-dir/other-dir";
+        let parent = to_absolute_path(parent_str);
+
+        // When
+        let result = fs.open_target(parent, Overwrite).await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening directory as target file should not be Ok") };
+        assert!(err.to_string().starts_with("Trying to write lines to a directory"), "Actual error: {}", err.to_string());
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_target_dir_write_new() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+
+        let parent_str = "top-dir/other-dir";
+        let parent = to_absolute_path(parent_str);
+
+        // When
+        let target_file_option = fs.open_target(parent, WriteNew).await?;
+
+        // Then
+        assert!(target_file_option.is_none());
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_root_ignore() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let root = to_absolute_path("/");
+
+        // When
+        let target_option = fs.open_target(root, Ignore).await?;
+
+        // Then
+        assert!(target_option.is_none());
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_missing_file_name() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let root = to_absolute_path("/");
+        debug!("File name of root: {:?}", root.file_name());
+        assert!(root.file_name().is_none());
+
+        // When
+        let result = fs.open_target(root, WriteNew).await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening the root of the file-system should not be Ok") };
+        assert!(err.to_string().starts_with("Missing file name:"), "Actual error: {}", &err);
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_file_in_file() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let file_in_file = to_absolute_path("/.profile/file");
+
+        // When
+        let result = fs.open_target(file_in_file, WriteNew).await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening a file in a file should not be Ok") };
+        assert!(err.to_string().starts_with("Not a directory:"), "Actual error: {}", &err);
+
+        Ok(())
+    }
+
+    // Implementation details
+
+    #[test(tokio::test)]
+    async fn write_to_dir() -> Result<()> {
+        // Given
+        let fixture_entry = FixtureEntry {
+            file_name: OsString::from("foo"),
+            path: to_absolute_path("/foo"),
+            is_dir: true,
+            content: DirFixtureContent {
+                entries: RwLock::new(AHashMap::new())
+            },
+        };
+        let entry = Arc::new(fixture_entry);
+
+        // When
+        let result = entry.write_line("Something").await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening directory as target file should not be Ok") };
+        assert!(err.to_string().starts_with("Trying to write a line to a directory"));
+
+        Ok(())
+    }
+
+    // Utilities
 
     fn to_absolute_path<S: Into<String>>(path: S) -> AbsolutePath {
         let root = AbsolutePath::try_new(PathBuf::from("/")).unwrap();
