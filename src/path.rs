@@ -1,6 +1,6 @@
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, Result};
 
 #[derive(Debug, Clone)]
 pub struct AbsolutePath(PathBuf);
@@ -24,7 +24,7 @@ impl AbsolutePath {
         if path.is_absolute() {
             Ok(AbsolutePath(path))
         } else {
-            bail!("Not an absolute path: {path:?}")
+            Err(anyhow!("Not an absolute path: {path:?}"))
         }
     }
 
@@ -69,15 +69,16 @@ impl SingleComponent {
         let path = path.as_ref();
         let mut components = path.components();
         if path.is_absolute() {
-            bail!("Attempt to create SigleComponent from absolute path: {path:?}")
+            return Err(anyhow!("Attempt to create SigleComponent from absolute path: {path:?}"))
         }
         if let Some(component) = components.next() {
-            if components.next().is_some() {
-                bail!("Attempt to create SigleComponent from path with multiple components: {path:?}")
+            if components.next().is_none() {
+                Ok(SingleComponent(PathBuf::from(component.as_os_str())))
+            } else {
+                Err(anyhow!("Attempt to create SigleComponent from path with multiple components: {path:?}"))
             }
-            Ok(SingleComponent(PathBuf::from(component.as_os_str())))
         } else {
-            bail!("Attempt to create SigleComponent from path with no components")
+            Err(anyhow!("Attempt to create SingleComponent from path with no components"))
         }
     }
 }
@@ -125,7 +126,7 @@ impl TryFrom<Component<'_>> for RelativePath {
     fn try_from(value: Component) -> std::result::Result<Self, Self::Error> {
         let result = PathBuf::from(value.as_os_str());
         if result.is_absolute() {
-            bail!("Could not convert absolute component to relative path: {value:?}")
+            Err(anyhow!("Could not convert absolute component to relative path: {value:?}"))
         } else {
             Ok(result.into())
         }
