@@ -61,7 +61,7 @@ impl TargetFile for Arc<FixtureEntry> {
             lines.push(line.into());
             Ok(())
         } else {
-            Err(anyhow!(format!("Trying to write a line to a directory: {:?}: {:?}", &line, &self.path)))
+            Err(anyhow!("Trying to write a line to a directory: {:?}: {:?}", &line, &self.path))
         }
     }
 
@@ -81,7 +81,7 @@ impl FileSystem for FixtureFileSystem {
 
     async fn read_dir(&self, directory: &AbsolutePath) -> Result<impl Stream<Item=Result<Self::DirEntryItem>> + Send + Sync> {
         let entries = stream! {
-            let dir_entry = self.find_entry(directory).await?;
+            let dir_entry = self.find_entry(directory, |_,_| Ok(None)).await?;
             if let DirFixtureContent { entries, .. } = &dir_entry.content {
                 let entries_content = entries.read().await;
                 for (_entry_name, entry) in entries_content.iter() {
@@ -111,7 +111,7 @@ impl FileSystem for FixtureFileSystem {
                                 }
                                 Ok(Some(file_entry.clone()))
                             } else {
-                                Err(anyhow!(format!("Trying to write lines to a directory: {:?}", file_path)))
+                                Err(anyhow!("Trying to write lines to a directory: {:?}", file_path))
                             }
                         } else {
                             Ok(None)
@@ -130,39 +130,21 @@ impl FileSystem for FixtureFileSystem {
                         Ok(Some(new_dir_entry))
                     }
                 },
-                _ => Err(anyhow!(format!("Not a directory: {:?}", file_path.parent())))
+                _ => Err(anyhow!("Not a directory: {:?}", file_path.parent()))
             }
         } else {
-            Err(anyhow!(format!("Missing file name: {:?}", file_path)))
+            Err(anyhow!("Missing file name: {:?}", file_path))
         }
     }
 
     async fn open_source(&self, file_path: AbsolutePath) -> Result<impl SourceFile> {
-        let current = self.find_parent_entry(&file_path).await?;
-        if let Some(file_name_ref) = file_path.file_name() {
-            let file_name = file_name_ref.to_os_string();
-            trace!("Open source: {:?}: {:?}", &file_name, &current);
-            if let DirFixtureContent { entries, .. } = &current.content {
-                let entries_content = entries.read().await;
-                if let Some(file_entry) = entries_content.get(&file_name.clone()) {
-                    if file_entry.is_dir().await? {
-                        Err(anyhow!(format!("Trying to read lines from a directory: {:?}", file_path)))
-                    } else {
-                        let (tx, rx) = channel(10);
-                        tokio::spawn(send_lines(file_entry.clone(), tx));
-                        Ok(FixtureSourceFile { file: file_entry.clone(), lines: rx })
-                    }
-                } else {
-                    for (n, _) in entries_content.iter() {
-                        debug!("Entry: {:?}", &n);
-                    }
-                    Err(anyhow!(format!("Not found: {:?}", &file_path)))
-                }
-            } else {
-                Err(anyhow!(format!("Not a directory: {:?}", &file_path.parent())))
-            }
+        let file_entry = self.find_entry(&file_path, |_,_| Ok(None)).await?;
+        if file_entry.is_dir().await? {
+            Err(anyhow!("Trying to read lines from a directory: {:?}", file_path))
         } else {
-            Err(anyhow!(format!("Missing file name: {:?}", &file_path)))
+            let (tx, rx) = channel(10);
+            tokio::spawn(send_lines(file_entry.clone(), tx));
+            Ok(FixtureSourceFile { file: file_entry.clone(), lines: rx })
         }
     }
 }
@@ -183,16 +165,17 @@ impl FixtureFileSystem {
     async fn find_parent_entry(&self, child_path: &AbsolutePath) -> Result<Arc<FixtureEntry>> {
         if let Some(dir_path) = child_path.parent() {
             let dir_path = AbsolutePath::try_new(dir_path.to_path_buf())?;
-            Ok(self.find_entry(&dir_path).await?)
+            debug!("Find entry for: {:?}", &dir_path);
+            Ok(self.find_entry(&dir_path, create_new_directory).await?)
         } else {
             debug!("Found root: {:?}", &self.data.path);
             Ok(self.data.clone())
         }
     }
 
-    async fn find_entry(&self, dir_path: &AbsolutePath) -> Result<Arc<FixtureEntry>> {
+    async fn find_entry(&self, dir_path: &AbsolutePath, dir_creator: impl DirectoryCreator) -> Result<Arc<FixtureEntry>> {
         let mut current = self.data.clone();
-        let mut current_path = PathBuf::new();
+        let mut current_path = PathBuf::from("/");
 
         let mut components = dir_path.components().peekable();
         if let Some(Component::RootDir) = &mut components.peek() {
@@ -213,28 +196,46 @@ impl FixtureFileSystem {
                 if let Some(entry) = entries_content.get(&part) {
                     child_entry = entry.clone();
                 } else {
-                    let new_dir = DirFixtureContent {
-                        entries: RwLock::new(AHashMap::new()),
-                    };
-                    let new_entry_path = AbsolutePath::try_new(current_path.clone())?;
-                    let new_dir_entry = FixtureEntry {
-                        file_name: part.clone(),
-                        path: new_entry_path,
-                        is_dir: true,
-                        content: new_dir
-                    };
-                    child_entry = Arc::new(new_dir_entry);
-                    entries_content.insert(part, current.clone());
-                    debug!("Created new directory: {:?}", child_entry);
+                    if let Some(new_dir_entry) = dir_creator(&current_path, &part)? {
+                        child_entry = Arc::new(new_dir_entry);
+                        entries_content.insert(part, child_entry.clone());
+                        debug!("Created new directory: {:?}", child_entry);
+                    } else {
+                        debug!("Not found: {:?}", &current_path);
+                        return Err(anyhow!("Not found: {:?}", &current_path));
+                    }
                 }
             } else {
-                return Err(anyhow!(format!("Not a directory: {:?}", &current_path)))
+                return Err(anyhow!("Not a directory: {:?}", &current_path))
             }
             current = child_entry;
         }
         debug!("Found dir: {:?}", &current.path);
         Ok(current)
     }
+}
+
+trait DirectoryCreator: Fn(&PathBuf, &OsString) -> Result<Option<FixtureEntry>> {}
+
+// Trick to be able to pass functions with a matching signature as
+// implementations of DirectoryCreator
+impl<F> DirectoryCreator for F
+where F: Fn(&PathBuf, &OsString) -> Result<Option<FixtureEntry>>,
+{}
+
+fn create_new_directory(current_path: &PathBuf, part: &OsString) -> Result<Option<FixtureEntry>> {
+    let new_dir = DirFixtureContent {
+        entries: RwLock::new(AHashMap::new()),
+    };
+    let new_entry_path = AbsolutePath::try_new(current_path.clone())?;
+    let new_dir_entry = FixtureEntry {
+        file_name: part.clone(),
+        path: new_entry_path,
+        is_dir: true,
+        content: new_dir
+    };
+    debug!("Created new directory: {:?}", new_dir_entry);
+    Ok(Some(new_dir_entry))
 }
 
 #[derive(Deserialize,Debug)]
@@ -347,19 +348,22 @@ mod test {
         // Given
         let fs = create_test_fixture_file_system()?;
 
-        let file_str = "file";
-        let parent_str = "top-dir/other-dir";
-        let path_os_string = OsString::from("/".to_string() + parent_str + "/" + file_str);
+        let entry_str = "other-dir";
+        let parent_str = "top-dir";
+        let path_os_string = OsString::from("/".to_string() + parent_str + "/" + entry_str);
         let parent = to_absolute_path(parent_str);
 
         // When
-        let mut dir_stream = pin!(fs.read_dir(&parent).await?);
+        let entries = read_dir_sorted(&fs, &parent).await?;
 
         // Then
-        let Some(entry_result) = dir_stream.next().await else { bail!("No entries found") };
-        let entry = entry_result?;
-        assert_eq!(OsString::from("file"), entry.file_name());
-        assert_eq!(path_os_string.as_os_str(), entry.path().as_os_str());
+        let expected = vec!["other-dir", "sibling-file", "sub-dir"].iter().map(OsString::from).collect::<Vec<_>>();
+        let actual = entries.iter().map(DirEntry::file_name).collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+
+        let entry = entries.get(0).unwrap();
+        assert_eq!(entry.path(), path_os_string);
+        assert!(entry.is_dir().await?);
 
         Ok(())
     }
@@ -376,11 +380,75 @@ mod test {
         // Then
         let Some(first_line) = source_file.next_line().await? else { bail!("File is empty") };
         assert_eq!(&first_line, "First line");
-        let Some(second_line) = source_file.next_line().await? else { bail!("File is empty") };
+        let Some(second_line) = source_file.next_line().await? else { bail!("File is too short") };
         assert_eq!(&second_line, "Second line");
-        let Some(third_line) = source_file.next_line().await? else { bail!("File is empty") };
+        let Some(third_line) = source_file.next_line().await? else { bail!("File is too short") };
         assert_eq!(&third_line, "Third line");
         assert!(source_file.next_line().await?.is_none());
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_source_non_existent() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let dir = to_absolute_path("/not-found.txt");
+
+        // When
+        let result = fs.open_source(dir).await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening a non-existent path should not be Ok") };
+        assert!(err.to_string().starts_with("Not found:"), "Actual error: {:?}", &err);
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_source_root() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let root = to_absolute_path("/");
+
+        // When
+        let result = fs.open_source(root).await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening root as source should not be Ok") };
+        assert!(err.to_string().starts_with("Trying to read lines from a directory:"), "Actual error: {:?}", &err);
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_source_directory() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let dir = to_absolute_path("/top-dir");
+
+        // When
+        let result = fs.open_source(dir).await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening a directory as source should not be Ok") };
+        assert!(err.to_string().starts_with("Trying to read lines from a directory:"), "Actual error: {:?}", &err);
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_source_file_in_file() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let dir = to_absolute_path("/.profile/file");
+
+        // When
+        let result = fs.open_source(dir).await;
+
+        // Then
+        let Err(err) = result else { bail!("Opening a file in a file should not be Ok") };
+        assert!(err.to_string().starts_with("Not a directory:"), "Actual error: {:?}", &err);
 
         Ok(())
     }
@@ -393,6 +461,11 @@ mod test {
     #[test(tokio::test)]
     async fn open_target_overwrite_new() -> Result<()> {
         open_target_overwrite("top-dir/sub-dir/new-file").await
+    }
+
+    #[test(tokio::test)]
+    async fn open_target_overwrite_new_dir() -> Result<()> {
+        open_target_overwrite("top-dir/new-dir/new-file").await
     }
 
     async fn open_target_overwrite(file: &str) -> Result<()> {
@@ -426,7 +499,7 @@ mod test {
 
         // Then
         let Err(err) = result else { bail!("Opening directory as target file should not be Ok") };
-        assert!(err.to_string().starts_with("Trying to write lines to a directory"), "Actual error: {}", err.to_string());
+        assert!(err.to_string().starts_with("Trying to write lines to a directory"), "Actual error: {:?}", &err);
 
         Ok(())
     }
@@ -448,7 +521,7 @@ mod test {
     }
 
     #[test(tokio::test)]
-    async fn open_root_ignore() -> Result<()> {
+    async fn open_target_root_ignore() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
         let root = to_absolute_path("/");
@@ -463,7 +536,7 @@ mod test {
     }
 
     #[test(tokio::test)]
-    async fn open_missing_file_name() -> Result<()> {
+    async fn open_missing_target_file_name() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
         let root = to_absolute_path("/");
@@ -475,13 +548,13 @@ mod test {
 
         // Then
         let Err(err) = result else { bail!("Opening the root of the file-system should not be Ok") };
-        assert!(err.to_string().starts_with("Missing file name:"), "Actual error: {}", &err);
+        assert!(err.to_string().starts_with("Missing file name:"), "Actual error: {:?}", &err);
 
         Ok(())
     }
 
     #[test(tokio::test)]
-    async fn open_file_in_file() -> Result<()> {
+    async fn open_target_file_in_file() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
         let file_in_file = to_absolute_path("/.profile/file");
@@ -490,8 +563,30 @@ mod test {
         let result = fs.open_target(file_in_file, WriteNew).await;
 
         // Then
-        let Err(err) = result else { bail!("Opening a file in a file should not be Ok") };
-        assert!(err.to_string().starts_with("Not a directory:"), "Actual error: {}", &err);
+        let Err(err) = result else { bail!("Opening a target file in a file should not be Ok") };
+        assert!(err.to_string().starts_with("Not a directory:"), "Actual error: {:?}", &err);
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn open_target_after_attempt_to_read_child_entry() -> Result<()> {
+        // Given
+        let fs = create_test_fixture_file_system()?;
+        let new_file = to_absolute_path("/new");
+        let file_in_file = to_absolute_path("/new/file");
+        let result = fs.open_source(file_in_file).await;
+        let Err(_) = result else { bail!("Opening a source file in a file should not be Ok") };
+
+        // When
+        let result = fs.open_target(new_file.clone(), WriteNew).await;
+
+        // Then
+        if let Some(mut target_file) = result? {
+            target_file.close().await?;
+        } else {
+            bail!("It should be possible to writ to new file: {:?}", new_file);
+        }
 
         Ok(())
     }
@@ -516,7 +611,7 @@ mod test {
 
         // Then
         let Err(err) = result else { bail!("Opening directory as target file should not be Ok") };
-        assert!(err.to_string().starts_with("Trying to write a line to a directory"));
+        assert!(err.to_string().starts_with("Trying to write a line to a directory"), "Actual error: {:?}", &err);
 
         Ok(())
     }
@@ -550,5 +645,15 @@ mod test {
 
         let yaml_source = StringReader::new(yaml);
         Ok(fixture_file_system(yaml_source)?)
+    }
+
+    async fn read_dir_sorted<FS: FileSystem>(fs: &FS, dir: &AbsolutePath) -> Result<Vec<FS::DirEntryItem>> {
+        let mut dir_stream = pin!(fs.read_dir(&dir).await?);
+        let mut entries = Vec::new();
+        while let Some(entry_result) = dir_stream.next().await {
+            entries.push(entry_result?)
+        }
+        entries.sort_by_key(|entry| entry.file_name());
+        Ok(entries)
     }
 }
