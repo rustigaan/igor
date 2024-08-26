@@ -151,3 +151,14 @@ fn get_path_prefix(path: &Path) -> Option<PathBuf> {
         None
     }
 }
+
+#[cfg(test)]
+pub mod test_utils {
+    use std::path::PathBuf;
+    use crate::path::AbsolutePath;
+
+    pub fn to_absolute_path<S: Into<String>>(path: S) -> AbsolutePath {
+        let root = AbsolutePath::try_new(PathBuf::from("/")).unwrap();
+        AbsolutePath::new(PathBuf::from(path.into()), &root)
+    }
+}

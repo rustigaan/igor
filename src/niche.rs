@@ -3,9 +3,10 @@ use std::path::{Path,PathBuf};
 use ahash::AHashMap;
 use log::{debug, info};
 use tokio::fs::DirEntry;
+use crate::config_model::*;
+use crate::file_system;
 use crate::interpolate;
 use crate::thundercloud;
-use crate::config_model::*;
 use crate::path::AbsolutePath;
 
 pub async fn process_niche(project_root: impl AsRef<Path>, niches_directory: impl AsRef<Path>, entry: DirEntry) -> Result<()> {
@@ -30,8 +31,11 @@ pub async fn process_niche(project_root: impl AsRef<Path>, niches_directory: imp
 
         let mut invar = niche_directory.clone();
         invar.push("invar");
+        let fs = file_system::real_file_system();
         let thunder_config = config.new_thunder_config(
+            fs.clone(),
             thundercloud_directory,
+            fs,
             invar,
             project_root
         );

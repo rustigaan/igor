@@ -1,3 +1,4 @@
+use stringreader::StringReader;
 use super::*;
 
 use crate::config_model::thundercloud_config_data::ThundercloudConfigData;
@@ -5,6 +6,10 @@ use crate::config_model::thundercloud_config_data::ThundercloudConfigData;
 pub fn from_reader<R: Read>(reader: R) -> Result<impl ThundercloudConfig> {
     let config: ThundercloudConfigData = ThundercloudConfig::from_reader(reader)?;
     Ok(config)
+}
+
+pub fn from_string(body: String) -> Result<impl ThundercloudConfig> {
+    ThundercloudConfigData::from_reader(StringReader::new(&body))
 }
 
 pub trait ThundercloudConfig : Debug + Sized {

@@ -7,6 +7,7 @@ use std::io::Read;
 use ahash::AHashMap;
 use serde::Deserialize;
 use serde_yaml::Mapping;
+use stringreader::StringReader;
 
 #[derive(Deserialize,Debug,Clone,Copy,Eq, PartialEq)]
 pub enum WriteMode {
@@ -37,6 +38,11 @@ pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
 pub fn from_reader<R: Read>(reader: R) -> Result<impl InvarConfig> {
     let config: InvarConfigData = InvarConfigData::from_reader(reader)?;
     Ok(config.with_props_option(None).into_owned())
+}
+
+pub fn from_string(body: String) -> Result<impl InvarConfig> {
+    let invar_config = InvarConfigData::from_reader(StringReader::new(&body))?;
+    Ok(invar_config)
 }
 
 #[cfg(test)]

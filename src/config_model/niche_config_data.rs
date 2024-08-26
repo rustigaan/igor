@@ -1,6 +1,6 @@
 use std::io::Read;
 use serde::Deserialize;
-use crate::file_system::real_file_system;
+use crate::file_system::FileSystem;
 use super::{ThunderConfig, UseThundercloudConfig, NicheConfig};
 use super::thunder_config_data::ThunderConfigData;
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
@@ -22,15 +22,14 @@ impl NicheConfig for NicheConfigData {
         &self.use_thundercloud
     }
 
-    fn new_thunder_config(&self, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig {
-        let file_system = real_file_system();
+    fn new_thunder_config<TFS: FileSystem, PFS: FileSystem>(&self, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig {
         ThunderConfigData::new(
             self.use_thundercloud.clone(),
             thundercloud_directory,
             invar,
             project_root,
-            &file_system,
-            &file_system
+            thundercloud_fs,
+            project_fs
         )
     }
 }

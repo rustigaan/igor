@@ -16,6 +16,9 @@ pub use real::real_file_system;
 #[cfg(test)]
 mod fixture;
 
+#[cfg(test)]
+pub use fixture::fixture_file_system;
+
 pub trait DirEntry: Debug + Send + Sync {
     fn path(&self) -> PathBuf;
     fn file_name(&self) -> OsString;
@@ -36,4 +39,12 @@ pub trait FileSystem: Debug + Send + Sync + Sized + Clone {
     fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync>> + Send;
     fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> impl Future<Output = Result<Option<impl TargetFile>>> + Send;
     fn open_source(&self, file_path: AbsolutePath) -> impl Future<Output = Result<impl SourceFile>> + Send;
+}
+
+pub async fn source_file_to_string<SF: SourceFile>(mut source_file: SF) -> Result<String> {
+    let mut lines = Vec::new();
+    while let Some(line) = source_file.next_line().await? {
+        lines.push(line);
+    }
+    Ok(lines.join("\n"))
 }

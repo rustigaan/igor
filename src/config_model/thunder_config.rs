@@ -9,8 +9,8 @@ pub trait ThunderConfig : Debug + Send + Sync {
     fn cumulus(&self) -> &AbsolutePath;
     fn invar(&self) -> &AbsolutePath;
     fn project_root(&self) -> &AbsolutePath;
-    fn thundercloud_file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry>;
-    fn project_file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry>;
+    fn thundercloud_file_system(&self) -> impl FileSystem<DirEntryItem=impl DirEntry>;
+    fn project_file_system(&self) -> impl FileSystem<DirEntryItem=impl DirEntry>;
 }
 
 #[cfg(test)]

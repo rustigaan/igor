@@ -15,7 +15,7 @@ pub struct ThunderConfigData<TFS: FileSystem, PFS: FileSystem> {
 }
 
 impl<TFS: FileSystem, PFS: FileSystem> ThunderConfigData<TFS, PFS> {
-    pub fn new(use_thundercloud: UseThundercloudConfigData, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath, thundercloud_file_system: &TFS, project_file_system: &PFS) -> Self {
+    pub fn new(use_thundercloud: UseThundercloudConfigData, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath, thundercloud_file_system: TFS, project_file_system: PFS) -> Self {
         let mut cumulus = thundercloud_directory.clone();
         cumulus.push("cumulus");
         ThunderConfigData {
@@ -52,11 +52,11 @@ impl<TFS: FileSystem, PFS: FileSystem> ThunderConfig for ThunderConfigData<TFS, 
         &self.project
     }
 
-    fn thundercloud_file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
-        &self.thundercloud_file_system
+    fn thundercloud_file_system(&self) -> impl FileSystem<DirEntryItem=impl DirEntry> {
+        self.thundercloud_file_system.clone()
     }
 
-    fn project_file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
-        &self.project_file_system
+    fn project_file_system(&self) -> impl FileSystem<DirEntryItem=impl DirEntry> {
+        self.project_file_system.clone()
     }
 }

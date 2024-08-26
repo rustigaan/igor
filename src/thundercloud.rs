@@ -14,15 +14,17 @@ use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercl
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
-use crate::file_system::{DirEntry, FileSystem, SourceFile, TargetFile};
+use crate::file_system::{source_file_to_string, DirEntry, FileSystem, SourceFile, TargetFile};
+use crate::thundercloud::DirectoryContext::{Project, ThunderCloud};
 
 pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
+    let thundercloud_fs = thunder_config.thundercloud_file_system();
     let thundercloud_directory = thunder_config.thundercloud_directory();
     let cumulus = thunder_config.cumulus();
     let invar = thunder_config.invar();
     let project_root = thunder_config.project_root();
     info!("Apply: {:?} ⊕ {:?} ⇒ {:?}", cumulus, invar, project_root);
-    let config = get_config(thundercloud_directory)?;
+    let config = get_config(thundercloud_directory, thundercloud_fs).await?;
     let niche = config.niche();
     info!("Thundercloud: {:?}: {:?}", niche.name(), niche.description().unwrap_or(&"-".to_string()));
     debug!("Use thundercloud: {:?}", thunder_config.use_thundercloud());
@@ -35,76 +37,84 @@ pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     Ok(())
 }
 
-fn get_config(thundercloud_directory: &AbsolutePath) -> Result<impl ThundercloudConfig> {
+async fn get_config<FS: FileSystem>(thundercloud_directory: &AbsolutePath, fs: FS) -> Result<impl ThundercloudConfig> {
     let mut config_path = thundercloud_directory.clone();
     config_path.push("thundercloud.yaml");
     info!("Config path: {config_path:?}");
 
-    let file = std::fs::File::open(&*config_path)?;
-    let config = thundercloud_config::from_reader(file)?;
+    let source_file = fs.open_source(config_path).await?;
+    let body = source_file_to_string(source_file).await?;
+    let config = get_config_from_string(body)?;
     debug!("Thundercloud configuration: {config:?}");
     Ok(config)
 }
 
+fn get_config_from_string(body: String) -> Result<impl ThundercloudConfig> {
+    let config = thundercloud_config::from_string(body)?;
+    debug!("Thundercloud configuration: {config:?}");
+    Ok(config)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DirectoryContext { ThunderCloud, Project }
+
 #[derive(Debug, Clone)]
-struct BoltCore {
-    base_name: String,
-    extension: String,
-    feature_name: String,
-    source: AbsolutePath,
+struct FileLocation {
+    path: AbsolutePath,
+    context: DirectoryContext,
 }
 
 #[derive(Debug, Clone)]
-enum Bolt {
-    Option(BoltCore),
+struct Bolt {
+    base_name: String,
+    extension: String,
+    feature_name: String,
+    source: FileLocation,
+    kind: BoltKind,
+}
+
+#[derive(Debug, Clone)]
+enum BoltKind {
+    Option,
     Fragment {
-        bolt_core: BoltCore,
         qualifier: Option<String>
     },
-    Config(BoltCore),
+    Config,
     Unknown {
-        bolt_core: BoltCore,
         qualifier: Option<String>
     },
 }
 
 impl Bolt {
-    fn bolt_core(&self) -> &BoltCore {
-        match self {
-            Bolt::Option(bolt_core) => bolt_core,
-            Bolt::Config(bolt_core) => bolt_core,
-            Bolt::Fragment { bolt_core, .. } => bolt_core,
-            Bolt::Unknown { bolt_core, .. } => bolt_core,
-        }
-    }
     fn kind_name(&self) -> &'static str {
-        match self {
-            Bolt::Option(_) => "option",
-            Bolt::Config(_) => "config",
-            Bolt::Fragment { .. } => "fragment",
-            Bolt::Unknown { .. } => "unknown",
+        match self.kind {
+            BoltKind::Option => "option",
+            BoltKind::Config => "config",
+            BoltKind::Fragment { .. } => "fragment",
+            BoltKind::Unknown { .. } => "unknown",
         }
     }
     fn base_name(&self) -> String {
-        self.bolt_core().base_name.clone()
+        self.base_name.clone()
     }
     fn extension(&self) -> String {
-        self.bolt_core().extension.clone()
+        self.extension.clone()
     }
     fn target_name(&self) -> String {
         let result = self.base_name().clone();
         result.add(self.extension().as_str())
     }
     fn feature_name(&self) -> String {
-        self.bolt_core().feature_name.clone()
+        self.feature_name.clone()
     }
     fn source(&self) -> &AbsolutePath {
-        &self.bolt_core().source
+        &self.source.path
     }
+    fn context(&self) -> DirectoryContext { self.source.context }
     fn qualifier(&self) -> Option<String> {
-        match self {
-            Bolt::Fragment { qualifier, .. } => qualifier.clone(),
-            Bolt::Unknown { qualifier, .. } => qualifier.clone(),
+        match &self.kind {
+            BoltKind::Fragment { qualifier, .. } => qualifier.clone(),
+            BoltKind::Unknown { qualifier, .. } => qualifier.clone(),
             _ => None
         }
     }
@@ -158,6 +168,7 @@ impl Thumbs {
 trait DirectoryLocation {
     fn file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry>;
     fn directory<'a, T: ThunderConfig>(&self, thunder_config: &'a T) -> &'a AbsolutePath;
+    fn context(&self) -> DirectoryContext;
 }
 
 struct CumulusDirectoryLocation<FS: FileSystem>(FS);
@@ -171,6 +182,10 @@ impl<FS: FileSystem> DirectoryLocation for InvarDirectoryLocation<FS> {
     fn directory<'a, T: ThunderConfig>(&self, thunder_config: &'a T) -> &'a AbsolutePath {
         thunder_config.invar()
     }
+
+    fn context(&self) -> DirectoryContext {
+        Project
+    }
 }
 
 impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
@@ -180,6 +195,10 @@ impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
 
     fn directory<'a, T: ThunderConfig>(&self, thunder_config: &'a T) -> &'a AbsolutePath {
         thunder_config.cumulus()
+    }
+
+    fn context(&self) -> DirectoryContext {
+        ThunderCloud
     }
 }
 
@@ -212,11 +231,14 @@ where
     TC: ThunderConfig,
     IC: InvarConfig
 {
+    let thundercloud_fs = thunder_config.thundercloud_file_system();
+    let project_fs = thunder_config.project_file_system();
+
     let mut bolts = bolts;
     let mut use_config = Cow::Borrowed(invar_config);
     if let Some(dir_bolts) = bolts.remove(".") {
         let (_, dir_bolt_list) = combine_and_filter_bolt_lists(&dir_bolts.0, &dir_bolts.1, thunder_config);
-        use_config = update_invar_config(invar_config, &dir_bolt_list).await?;
+        use_config = update_invar_config(invar_config, &dir_bolt_list, &thundercloud_fs, &project_fs).await?;
     }
     let bolts = bolts;
 
@@ -228,11 +250,11 @@ where
             continue;
         }
         let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
-        let half_config = update_invar_config(invar_config, &bolt_lists.0).await?;
-        let whole_config = update_invar_config(half_config.as_ref(), &bolt_lists.1).await?;
+        let half_config = update_invar_config(invar_config, &bolt_lists.0, &thundercloud_fs, &project_fs).await?;
+        let whole_config = update_invar_config(half_config.as_ref(), &bolt_lists.1, &thundercloud_fs, &project_fs).await?;
         let (option, bolts) = combine_and_filter_bolt_lists(&bolt_lists.0, &bolt_lists.1, thunder_config);
         let file_system = thunder_config.project_file_system();
-        generate_file(file_system, &target_file, option, bolts, whole_config.as_ref()).await?;
+        generate_file(&file_system, &target_file, option, bolts, whole_config.as_ref()).await?;
     }
     Ok(())
 }
@@ -317,9 +339,9 @@ where
     TF: TargetFile
 {
     for bolt in fragments {
-        if let Bolt::Fragment { bolt_core, qualifier: fragment_qualifier, .. } = bolt {
+        if let BoltKind::Fragment { qualifier: fragment_qualifier, .. } = &bolt.kind {
             let fragment_qualifier = fragment_qualifier.as_ref().map(ToOwned::to_owned).unwrap_or("".to_string());
-            if bolt_core.feature_name == feature && fragment_qualifier == qualifier {
+            if bolt.feature_name == feature && fragment_qualifier == qualifier {
                 debug!("Found fragment to include: {:?}", bolt);
                 include_fragment(file_system, bolt, feature, qualifier, target_file, fragments, invar_config).await?;
                 break;
@@ -441,15 +463,21 @@ fn interpolate<IC: InvarConfig>(line: &str, invar_config: &IC) -> String {
     result
 }
 
-async fn update_invar_config<'a, IC>(invar_config: &'a IC, bolts: &Vec<Bolt>) -> Result<Cow<'a, IC>>
+async fn update_invar_config<'a, IC, TFS, PFS>(invar_config: &'a IC, bolts: &Vec<Bolt>, thundercloud_fs: &TFS, project_fs: &PFS) -> Result<Cow<'a, IC>>
 where
-    IC: InvarConfig
+    IC: InvarConfig,
+    TFS: FileSystem,
+    PFS: FileSystem,
 {
     let mut use_config = Cow::Borrowed(invar_config);
     for bolt in bolts {
         debug!("Bolt kind: {:?}", bolt.kind_name());
-        if let Bolt::Config(_) = bolt {
-            let bolt_invar_config = get_invar_config(bolt.source()).await?;
+        if let BoltKind::Config = bolt.kind {
+            let bolt_invar_config_body = match bolt.source.context {
+                ThunderCloud => get_invar_config_body(bolt.source(), thundercloud_fs).await?,
+                Project => get_invar_config_body(bolt.source(), project_fs).await?,
+            };
+            let bolt_invar_config = get_invar_config(bolt_invar_config_body)?;
             debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
             let new_use_config = use_config.to_owned().with_invar_config(bolt_invar_config).into_owned();
             use_config = Cow::Owned(new_use_config);
@@ -459,11 +487,15 @@ where
     Ok(use_config)
 }
 
-async fn get_invar_config(source: &AbsolutePath) -> Result<impl InvarConfig> {
+async fn get_invar_config_body<FS: FileSystem>(source: &AbsolutePath, fs: &FS) -> Result<String> {
     info!("Config path: {source:?}");
 
-    let file = std::fs::File::open(source.as_path())?;
-    let config = invar_config::from_reader(file)?;
+    let source_file = fs.open_source(source.clone()).await?;
+    source_file_to_string(source_file).await
+}
+
+fn get_invar_config(body: String) -> Result<impl InvarConfig> {
+    let config = invar_config::from_string(body)?;
     debug!("Invar configuration: {config:?}");
     Ok(config)
 }
@@ -489,9 +521,9 @@ where
     let mut fragments = Vec::new();
     for bolt in bolt_list {
         if features.contains(&bolt.feature_name() as &str) {
-            if let Bolt::Option(_) = bolt {
+            if let BoltKind::Option = bolt.kind {
                 options.push(bolt.clone());
-            } else if let Bolt::Fragment { .. } = bolt {
+            } else if let BoltKind::Fragment { .. } = bolt.kind {
                 fragments.push(bolt.clone())
             }
         }
@@ -550,12 +582,12 @@ fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bol
     let mut result = invar_bolts_list.clone();
     let mut invar_fragments = AHashSet::new();
     for invar_bolt in invar_bolts_list {
-        if let Bolt::Fragment { .. } = invar_bolt {
+        if let BoltKind::Fragment { .. } = invar_bolt.kind {
             invar_fragments.insert((invar_bolt.feature_name(), invar_bolt.qualifier()));
         }
     }
     for cumulus_bolt in cumulus_bolts_list {
-        if let Bolt::Fragment { .. } = cumulus_bolt {
+        if let BoltKind::Fragment { .. } = cumulus_bolt.kind {
             if invar_fragments.contains(&(cumulus_bolt.feature_name(), cumulus_bolt.qualifier())) {
                 continue;
             }
@@ -605,7 +637,8 @@ where
             }
         } else {
             let file_name = entry.file_name().to_string_lossy().into_owned();
-            let source = RelativePath::from(file_name.as_str()).relative_to(directory);
+            let source_path = RelativePath::from(file_name.as_str()).relative_to(directory);
+            let source = FileLocation { path: source_path, context: directory_location.context() };
             let bolt;
             if let Some(captures) = BOLT_REGEX_WITH_DOT.captures(&file_name) {
                 debug!("Bolt regex with dot: {:?}", &file_name);
@@ -621,20 +654,22 @@ where
                     } else {
                         (&*file_name, "")
                     };
-                bolt = Bolt::Option(BoltCore {
+                bolt = Bolt{
                     base_name: base_name.to_string(),
                     extension: extension.to_string(),
                     feature_name: "@".to_string(),
                     source,
-                })
+                    kind: BoltKind::Option
+                }
             } else {
                 debug!("Unrecognized file name: {:?}", &file_name);
-                bolt = Bolt::Option(BoltCore {
+                bolt = Bolt{
                     base_name: file_name.to_string(),
                     extension: "".to_string(),
                     feature_name: "@".to_string(),
                     source,
-                })
+                    kind: BoltKind::Option
+                }
             }
             debug!("Bolt: {bolt:?}");
             add(&mut bolts, &bolt.target_name(), bolt);
@@ -643,9 +678,9 @@ where
     for (target_name, bolts) in &bolts {
         let mut qualifiers = Vec::new();
         for bolt in bolts {
-            let qualifier = match bolt {
-                Bolt::Fragment { qualifier, .. } => qualifier,
-                Bolt::Unknown { qualifier, .. } => qualifier,
+            let qualifier = match &bolt.kind {
+                BoltKind::Fragment { qualifier, .. } => qualifier,
+                BoltKind::Unknown { qualifier, .. } => qualifier,
                 _ => &None
             };
             if let Some(qualifier) = qualifier {
@@ -657,7 +692,7 @@ where
     Ok((bolts, subdirectories))
 }
 
-fn captures_to_bolt(captures: Captures, source: AbsolutePath) -> Result<Bolt> {
+fn captures_to_bolt(captures: Captures, source: FileLocation) -> Result<Bolt> {
     let extension = captures.name("extension").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
     let feature_name = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
     let qualifier = captures.name("qualifier").map(|m|m.as_str().to_string());
@@ -670,13 +705,13 @@ fn captures_to_bolt(captures: Captures, source: AbsolutePath) -> Result<Bolt> {
         let bolt_type = bolt_type.as_str();
         let bolt =
             if bolt_type == "option" {
-                Bolt::Option(BoltCore{base_name,extension,feature_name,source})
+                Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Option}
             } else if bolt_type == "config" {
                 create_config(base_name_orig.as_str(), &base_name, &extension, &feature_name, source)
             } else if bolt_type == "fragment" {
-                Bolt::Fragment { bolt_core: BoltCore { base_name, extension, feature_name, source }, qualifier }
+                Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Fragment { qualifier } }
             } else {
-                Bolt::Unknown { bolt_core: BoltCore{base_name, extension, feature_name, source }, qualifier }
+                Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Unknown { qualifier } }
             };
         Ok(bolt)
     } else {
@@ -684,21 +719,23 @@ fn captures_to_bolt(captures: Captures, source: AbsolutePath) -> Result<Bolt> {
     }
 }
 
-fn create_config(base_name_orig: &str, base_name: &str, extension: &str, feature_name: &str, source: AbsolutePath) -> Bolt {
+fn create_config(base_name_orig: &str, base_name: &str, extension: &str, feature_name: &str, source: FileLocation) -> Bolt {
     if base_name_orig == "dot" && extension == ".yaml" {
-        Bolt::Config(BoltCore{
+        Bolt{
             base_name: ".".to_string(),
             extension: "".to_string(),
             feature_name: feature_name.to_string(),
             source,
-        })
+            kind: BoltKind::Config,
+        }
     } else {
-        Bolt::Config(BoltCore{
+        Bolt{
             base_name: base_name.to_string(),
             extension: extension.to_string(),
             feature_name: feature_name.to_string(),
             source,
-        })
+            kind: BoltKind::Config,
+        }
     }
 }
 
@@ -712,5 +749,133 @@ where
         let mut new_list = Vec::new();
         new_list.push(item);
         map.insert(key.clone(), new_list);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use indoc::indoc;
+    use stringreader::StringReader;
+    use test_log::test;
+    use crate::config_model::niche_config;
+    use crate::config_model::niche_config::NicheConfig;
+    use crate::file_system::fixture_file_system;
+    use crate::path::test_utils::to_absolute_path;
+    use super::*;
+
+    #[test(tokio::test)]
+    async fn test_process_niche() -> Result<()> {
+        // Given
+        let fs = create_file_system_fixture()?;
+        let niche_configuration = create_niche_config(fs.clone()).await?;
+        let thunder_config = create_thunder_config(&niche_configuration, fs.clone()).await?;
+
+        // When
+        let result = process_niche(thunder_config).await;
+
+        // Then
+        result
+    }
+
+    async fn create_niche_config<FS: FileSystem>(fs: FS) -> Result<impl NicheConfig> {
+        let source_file = fs.open_source(to_absolute_path("/yeth-mathtur/example/igor-thettingth.yaml")).await?;
+        let body = body(source_file).await?;
+        Ok(niche_config::test_utils::from_string(body)?)
+    }
+
+    async fn create_thunder_config<'a, NC: NicheConfig, FS: FileSystem + 'a>(niche_configuration: &'a NC, fs: FS) -> Result<impl ThunderConfig + 'a> {
+        let project_root = to_absolute_path("/");
+        let thundercloud_directory = to_absolute_path("/example-thundercloud");
+        let invar_directory = to_absolute_path("/yeth-mathtur/example/invar");
+        let thunder_config = niche_configuration.new_thunder_config(fs.clone(), thundercloud_directory, fs, invar_directory, project_root);
+        Ok(thunder_config)
+    }
+
+    // Utilities
+
+    async fn body<SF: SourceFile>(mut source_file: SF) -> Result<String> {
+        let mut body = Vec::new();
+        while let Some(line) = source_file.next_line().await? {
+            body.push(line);
+        }
+        Ok(body.join("\n"))
+    }
+
+    fn create_file_system_fixture() -> Result<impl FileSystem> {
+        let yaml = indoc! {r#"
+                example-thundercloud:
+                    thundercloud.yaml: |
+                        ---
+                        niche:
+                          name: example
+                          description: Example thundercloud for demonstration purposes
+                        invar-defaults:
+                          write-mode: Overwrite
+                          interpolate: true
+                          props:
+                            milk-man: Ronny Soak
+                            alter-ego: Lobsang
+                    cumulus:
+                        clock+option-grlass.yaml: |
+                            ---
+                            sweeper: "${sweeper}"
+                            raising:
+                              - "steam"
+                              - "money"
+                            # ==== BEGIN FRAGMENT glass-spring ====
+                              - "replaced-by-fragment"
+                            # ==== END FRAGMENT glass-spring ====
+                              - "to the occasion"
+                yeth-mathtur:
+                    example:
+                        igor-thettingth.yaml: |
+                            ---
+                            use-thundercloud:
+                              directory: "{{PROJECT}}/example-thundercloud"
+                              on-incoming: Update
+                              features:
+                                - glass
+                                - bash_config
+                                - kermie
+                              invar-defaults:
+                                props:
+                                  mathtur: Jeremy
+                                  buyer: Myra LeJean
+                                  milk-man: Kaos
+                        invar:
+                            workshop:
+                                bench:
+                                    press+option-free: |
+                                        #!/usr/bin/false
+
+                                        echo 'Hello, world!'
+                                clock+config-glass.yaml: |
+                                    write-mode: Overwrite
+                                    props:
+                                      sweeper: Lu Tse
+                                clock+fragment-glass-spring.yaml: |
+                                    # ==== BEGIN FRAGMENT glass-spring ====
+                                    ---
+                                    spring:
+                                      material: glass
+                                      delicate: true
+                                      number-of-coils: 17
+                                    raising:
+                                      - "expectations"
+                                    # ==== END FRAGMENT glass-spring ====
+                                README+fragment-@-details.md: |
+                                    ## Details
+
+                                    The details of this project.
+
+                                    * Mathtur: ${mathtur}
+                                    * Buyer: ${buyer}
+                                    * Milk man: ${milk-man}
+                                    * Undefined: ${undefined}
+            "#};
+        trace!("YAML: [{}]", &yaml);
+
+        let yaml_source = StringReader::new(yaml);
+        Ok(fixture_file_system(yaml_source)?)
     }
 }
