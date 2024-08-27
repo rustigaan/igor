@@ -5,6 +5,7 @@ use log::{debug, info};
 use tokio::fs::DirEntry;
 use crate::config_model::*;
 use crate::file_system;
+use crate::file_system::{FileSystem};
 use crate::interpolate;
 use crate::thundercloud;
 use crate::path::AbsolutePath;
@@ -33,7 +34,7 @@ pub async fn process_niche(project_root: impl AsRef<Path>, niches_directory: imp
         invar.push("invar");
         let fs = file_system::real_file_system();
         let thunder_config = config.new_thunder_config(
-            fs.clone(),
+            fs.clone().read_only(),
             thundercloud_directory,
             fs,
             invar,

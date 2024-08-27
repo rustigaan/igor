@@ -473,7 +473,7 @@ where
     for bolt in bolts {
         debug!("Bolt kind: {:?}", bolt.kind_name());
         if let BoltKind::Config = bolt.kind {
-            let bolt_invar_config_body = match bolt.source.context {
+            let bolt_invar_config_body = match bolt.context() {
                 ThunderCloud => get_invar_config_body(bolt.source(), thundercloud_fs).await?,
                 Project => get_invar_config_body(bolt.source(), project_fs).await?,
             };
@@ -766,9 +766,10 @@ mod test {
     #[test(tokio::test)]
     async fn test_process_niche() -> Result<()> {
         // Given
-        let fs = create_file_system_fixture()?;
-        let niche_configuration = create_niche_config(fs.clone()).await?;
-        let thunder_config = create_thunder_config(&niche_configuration, fs.clone()).await?;
+        let thundercloud_fs = create_thundercloud_file_system_fixture()?.read_only();
+        let project_fs = create_project_file_system_fixture()?;
+        let niche_configuration = create_niche_config(project_fs.clone()).await?;
+        let thunder_config = create_thunder_config(&niche_configuration, thundercloud_fs.clone(), project_fs.clone()).await?;
 
         // When
         let result = process_niche(thunder_config).await;
@@ -783,11 +784,11 @@ mod test {
         Ok(niche_config::test_utils::from_string(body)?)
     }
 
-    async fn create_thunder_config<'a, NC: NicheConfig, FS: FileSystem + 'a>(niche_configuration: &'a NC, fs: FS) -> Result<impl ThunderConfig + 'a> {
+    async fn create_thunder_config<'a, NC: NicheConfig, TFS: FileSystem + 'a, PFS: FileSystem + 'a>(niche_configuration: &'a NC, thundercloud_fs: TFS, project_fs: PFS) -> Result<impl ThunderConfig + 'a> {
         let project_root = to_absolute_path("/");
         let thundercloud_directory = to_absolute_path("/example-thundercloud");
         let invar_directory = to_absolute_path("/yeth-mathtur/example/invar");
-        let thunder_config = niche_configuration.new_thunder_config(fs.clone(), thundercloud_directory, fs, invar_directory, project_root);
+        let thunder_config = niche_configuration.new_thunder_config(thundercloud_fs, thundercloud_directory, project_fs, invar_directory, project_root);
         Ok(thunder_config)
     }
 
@@ -801,7 +802,7 @@ mod test {
         Ok(body.join("\n"))
     }
 
-    fn create_file_system_fixture() -> Result<impl FileSystem> {
+    fn create_thundercloud_file_system_fixture() -> Result<impl FileSystem> {
         let yaml = indoc! {r#"
                 example-thundercloud:
                     thundercloud.yaml: |
@@ -826,6 +827,15 @@ mod test {
                               - "replaced-by-fragment"
                             # ==== END FRAGMENT glass-spring ====
                               - "to the occasion"
+            "#};
+        trace!("YAML: [{}]", &yaml);
+
+        let yaml_source = StringReader::new(yaml);
+        Ok(fixture_file_system(yaml_source)?)
+    }
+
+    fn create_project_file_system_fixture() -> Result<impl FileSystem> {
+        let yaml = indoc! {r#"
                 yeth-mathtur:
                     example:
                         igor-thettingth.yaml: |

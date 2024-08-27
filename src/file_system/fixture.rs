@@ -36,7 +36,6 @@ struct FixtureEntry {
 }
 
 struct FixtureSourceFile {
-    file: Arc<FixtureEntry>,
     lines: Receiver<String>,
 }
 
@@ -144,7 +143,7 @@ impl FileSystem for FixtureFileSystem {
         } else {
             let (tx, rx) = channel(10);
             tokio::spawn(send_lines(file_entry.clone(), tx));
-            Ok(FixtureSourceFile { file: file_entry.clone(), lines: rx })
+            Ok(FixtureSourceFile { lines: rx })
         }
     }
 }

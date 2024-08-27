@@ -1,7 +1,5 @@
-#![allow(dead_code)]
-
 use std::ffi::OsString;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::fmt::Debug;
 use std::future::Future;
 use std::path::PathBuf;
@@ -18,6 +16,9 @@ mod fixture;
 
 #[cfg(test)]
 pub use fixture::fixture_file_system;
+
+#[derive(Debug, Clone)]
+struct ReadOnlyFileSystem<FS: FileSystem>(FS);
 
 pub trait DirEntry: Debug + Send + Sync {
     fn path(&self) -> PathBuf;
@@ -39,6 +40,42 @@ pub trait FileSystem: Debug + Send + Sync + Sized + Clone {
     fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync>> + Send;
     fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> impl Future<Output = Result<Option<impl TargetFile>>> + Send;
     fn open_source(&self, file_path: AbsolutePath) -> impl Future<Output = Result<impl SourceFile>> + Send;
+    fn read_only(self) -> impl FileSystem {
+        ReadOnlyFileSystem(self)
+    }
+}
+
+#[allow(dead_code)]
+struct DummyTarget;
+
+impl TargetFile for DummyTarget {
+    async fn write_line<S: Into<String> + Debug + Send>(&self, _line: S) -> Result<()> {
+        Err(anyhow!("Trying to write a line to a dummy target"))
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl<FS: FileSystem> FileSystem for ReadOnlyFileSystem<FS> {
+    type DirEntryItem = FS::DirEntryItem;
+
+    fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output=Result<impl Stream<Item=Result<Self::DirEntryItem>> + Send + Sync>> + Send {
+        self.0.read_dir(directory)
+    }
+
+    async fn open_target(&self, _file_path: AbsolutePath, _write_mode: WriteMode) -> Result<Option<impl TargetFile>> {
+        Ok(None::<DummyTarget>)
+    }
+
+    fn open_source(&self, file_path: AbsolutePath) -> impl Future<Output=Result<impl SourceFile>> + Send {
+        self.0.open_source(file_path)
+    }
+
+    fn read_only(self) -> impl FileSystem {
+        self
+    }
 }
 
 pub async fn source_file_to_string<SF: SourceFile>(mut source_file: SF) -> Result<String> {
