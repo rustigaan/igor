@@ -83,5 +83,6 @@ pub async fn source_file_to_string<SF: SourceFile>(mut source_file: SF) -> Resul
     while let Some(line) = source_file.next_line().await? {
         lines.push(line);
     }
+    lines.push("".to_string());
     Ok(lines.join("\n"))
 }

@@ -19,6 +19,10 @@ use crate::thundercloud::DirectoryContext::{Project, ThunderCloud};
 
 pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
     let generation_context = GenerationContext(thunder_config);
+    process_niche_in_context(&generation_context).await
+}
+
+async fn process_niche_in_context<T: ThunderConfig>(generation_context: &GenerationContext<T>) -> Result<()> {
     let thundercloud_fs = generation_context.0.thundercloud_file_system();
     let thundercloud_directory = generation_context.0.thundercloud_directory();
     let cumulus = generation_context.0.cumulus();
@@ -612,9 +616,8 @@ where
     IC: InvarConfig,
     TF: TargetFile
 {
-    let mut line = interpolate(&line, invar_config);
-    debug!("Send to writer: {:?}", line);
-    line.push('\n');
+    let line = interpolate(&line, invar_config);
+    debug!("Send to writer: {:?}", &line);
     target_file.write_line(line).await?;
     Ok(())
 }
@@ -775,12 +778,40 @@ mod test {
         let project_fs = create_project_file_system_fixture()?;
         let niche_configuration = create_niche_config(project_fs.clone()).await?;
         let thunder_config = create_thunder_config(&niche_configuration, thundercloud_fs.clone(), project_fs.clone()).await?;
+        let generation_context = GenerationContext(thunder_config);
 
         // When
-        let result = process_niche(thunder_config).await;
+        let result = process_niche_in_context(&generation_context).await;
 
         // Then
-        result
+        result?;
+
+        let source_path = to_absolute_path("/workshop/clock.yaml");
+        let fs = generation_context.0.project_file_system();
+        let source_file = fs.open_source(source_path).await?;
+        let body = source_file_to_string(source_file).await?;
+
+        let yaml = indoc! {r#"
+            ---
+            sweeper: "Lu Tse"
+            raising:
+              - "steam"
+              - "money"
+            # ==== BEGIN FRAGMENT glass-spring ====
+            ---
+            spring:
+              material: glass
+              delicate: true
+              number-of-coils: 17
+            raising:
+              - "expectations"
+            # ==== END FRAGMENT glass-spring ====
+              - "to the occasion"
+        "#};
+
+        assert_eq!(body, yaml);
+
+        Ok(())
     }
 
     async fn create_niche_config<FS: FileSystem>(fs: FS) -> Result<impl NicheConfig> {
@@ -822,16 +853,25 @@ mod test {
                             milk-man: Ronny Soak
                             alter-ego: Lobsang
                     cumulus:
-                        clock+option-grlass.yaml: |
-                            ---
-                            sweeper: "${sweeper}"
-                            raising:
-                              - "steam"
-                              - "money"
-                            # ==== BEGIN FRAGMENT glass-spring ====
-                              - "replaced-by-fragment"
-                            # ==== END FRAGMENT glass-spring ====
-                              - "to the occasion"
+                        workshop:
+                            clock+config-glass.yaml: |
+                                write-mode: WriteNew
+                            clock+fragment-glass-spring.yaml: |
+                                ---
+                                spring:
+                                  material: glass
+                                  delicate: false
+                                  number-of-coils: 3
+                            clock+option-glass.yaml: |
+                                ---
+                                sweeper: "${sweeper}"
+                                raising:
+                                  - "steam"
+                                  - "money"
+                                # ==== BEGIN FRAGMENT glass-spring ====
+                                  - "replaced-by-fragment"
+                                # ==== END FRAGMENT glass-spring ====
+                                  - "to the occasion"
             "#};
         trace!("YAML: [{}]", &yaml);
 
