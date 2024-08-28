@@ -1,7 +1,7 @@
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use anyhow::{anyhow, Result};
-use verbatim::PathExt;
+use log::debug;
 
 #[derive(Debug, Clone)]
 pub struct AbsolutePath(PathBuf);
@@ -32,7 +32,23 @@ impl AbsolutePath {
     pub fn push(&mut self, path: impl Into<RelativePath>) -> () {
         let relative_path = path.into();
         self.0.push(relative_path.0);
-        self.0 = self.0.to_verbatim();
+        self.canonicalize();
+    }
+
+    pub fn canonicalize(&mut self) {
+        let mut canonical = PathBuf::new();
+        for component in self.0.components() {
+            canonical.push(component);
+            // match component {
+            //     Component::RootDir => debug!("RootDir"),
+            //     Component::ParentDir => debug!("ParentDir"),
+            //     Component::CurDir => debug!("CurDir"),
+            //     Component::Prefix(prefix) => debug!("Prefix({:?})", prefix),
+            //     Component::Normal(part) => debug!("Normal({:?})", part)
+            // }
+        }
+        debug!("Canonical: {:?}", canonical);
+        self.0 = canonical;
     }
 }
 

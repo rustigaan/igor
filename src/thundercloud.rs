@@ -250,16 +250,13 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             let half_config = self.update_invar_config(invar_config, &bolt_lists.0).await?;
             let whole_config = self.update_invar_config(half_config.as_ref(), &bolt_lists.1).await?;
             let (option, bolts) = self.combine_and_filter_bolt_lists(&bolt_lists.0, &bolt_lists.1);
-            let file_system = self.0.project_file_system();
-            self.generate_file(&file_system, &target_file, option, bolts, whole_config.as_ref()).await?;
+            self.generate_file(&target_file, option, bolts, whole_config.as_ref()).await?;
         }
         Ok(())
     }
 
-    async fn generate_file<FS, IC>(&self, file_system: &FS, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IC) -> Result<()>
-    where
-        FS: FileSystem,
-        IC: InvarConfig
+    async fn generate_file<IC>(&self, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IC) -> Result<()>
+    where IC: InvarConfig
     {
         if bolts.is_empty() {
             debug!("Skip: {:?}: {:?}", target_path, &bolts);
@@ -277,8 +274,21 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             debug!("Ignore: {:?}: {:?}: {:?}", target_path, &bolts, &invar_config);
             return Ok(())
         }
+        let file_system = self.0.project_file_system();
         if let Some(target_file) = file_system.open_target(target_path.clone(), invar_config.write_mode()).await? {
-            self.generate_option(file_system, option, bolts, invar_config, &target_file).await?;
+            let source = option.source();
+            match option.context() {
+                ThunderCloud => {
+                    let fs = self.0.thundercloud_file_system();
+                    let source_file = fs.open_source(source.clone()).await?;
+                    self.generate_option(option, bolts, invar_config, source_file, &target_file).await?
+                },
+                Project => {
+                    let fs = self.0.project_file_system();
+                    let source_file = fs.open_source(source.clone()).await?;
+                    self.generate_option(option, bolts, invar_config, source_file, &target_file).await?
+                }
+            }
             let mut target_file_mut = target_file;
             target_file_mut.close().await?;
         } else {
@@ -287,15 +297,13 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn generate_option<FS, IC, TF>(&self, file_system: &FS, option: Bolt, fragments: Vec<Bolt>, invar_config: &IC, target_file: &TF) -> Result<()>
+    async fn generate_option<IC, SF, TF>(&self, option: Bolt, fragments: Vec<Bolt>, invar_config: &IC, mut source_file: SF, target_file: &TF) -> Result<()>
     where
-        FS: FileSystem,
         IC: InvarConfig,
+        SF: SourceFile,
         TF: TargetFile
     {
         debug!("Generating option: {:?}: {:?}: {:?}", &option, &fragments, invar_config);
-        let source = option.source();
-        let mut source_file = file_system.open_source(source.clone()).await?;
         while let Some(line) = source_file.next_line().await? {
             if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
                 let feature = captures.name("feature").map(|m| m.as_str().to_string()).unwrap_or("@".to_string());
@@ -306,7 +314,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                         skip_to_end_of_fragment(&mut source_file, &feature, &qualifier).await?;
                     }
                 }
-                self.find_and_include_fragment(file_system, &feature, &qualifier, target_file, &fragments, invar_config).await?;
+                self.find_and_include_fragment(&feature, &qualifier, target_file, &fragments, invar_config).await?;
                 continue;
             }
             send_to_writer(&line, invar_config, target_file).await?;
@@ -314,9 +322,8 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn find_and_include_fragment<FS, IC, TF>(&self, file_system: &FS, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+    async fn find_and_include_fragment<IC, TF>(&self, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
     where
-        FS: FileSystem,
         IC: InvarConfig,
         TF: TargetFile
     {
@@ -325,7 +332,19 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 let fragment_qualifier = fragment_qualifier.as_ref().map(ToOwned::to_owned).unwrap_or("".to_string());
                 if bolt.feature_name == feature && fragment_qualifier == qualifier {
                     debug!("Found fragment to include: {:?}", bolt);
-                    self.include_fragment(file_system, bolt, feature, qualifier, target_file, fragments, invar_config).await?;
+                    let source = bolt.source();
+                    match bolt.context() {
+                        ThunderCloud => {
+                            let fs = self.0.thundercloud_file_system();
+                            let source_file = fs.open_source(source.clone()).await?;
+                            self.include_fragment(source_file, feature, qualifier, target_file, fragments, invar_config).await?;
+                        },
+                        Project => {
+                            let fs = self.0.project_file_system();
+                            let source_file = fs.open_source(source.clone()).await?;
+                            self.include_fragment(source_file, feature, qualifier, target_file, fragments, invar_config).await?;
+                        }
+                    }
                     break;
                 }
             }
@@ -333,14 +352,12 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn include_fragment<FS, TF, IC>(&self, file_system: &FS, fragment: &Bolt, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+    async fn include_fragment<SF, TF, IC>(&self, mut source_file: SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
     where
-        FS: FileSystem,
+        SF: SourceFile,
         TF: TargetFile,
         IC: InvarConfig
     {
-        let source = fragment.source().clone();
-        let mut source_file = file_system.open_source(source).await?;
         while let Some(line) = source_file.next_line().await? {
             if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
                 let placeholder_feature = captures.name("feature").map(|m| m.as_str().to_string()).unwrap_or("@".to_string());
@@ -349,7 +366,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 if let Some(bracket) = captures.name("bracket") {
                     if bracket.as_str() == "BEGIN " && placeholder_feature == feature && placeholder_qualifier == qualifier {
                         send_to_writer(&line, invar_config, target_file).await?;
-                        self.copy_to_end_of_fragment(file_system, &mut source_file, &feature, &qualifier, target_file, fragments, invar_config).await?;
+                        self.copy_to_end_of_fragment(&mut source_file, &feature, &qualifier, target_file, fragments, invar_config).await?;
                     }
                 }
                 return Ok(());
@@ -359,9 +376,8 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn copy_to_end_of_fragment<FS, SF, TF, IC>(&self, file_system: &FS, lines: &mut SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+    async fn copy_to_end_of_fragment<SF, TF, IC>(&self, lines: &mut SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
     where
-        FS: FileSystem,
         SF: SourceFile,
         TF: TargetFile,
         IC: InvarConfig
@@ -378,7 +394,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                             skip_to_end_of_fragment(lines, &feature, &qualifier).await?;
                         }
                     }
-                    Box::pin(self.find_and_include_fragment(file_system, &feature, &qualifier, target_file, fragments, invar_config)).await?;
+                    Box::pin(self.find_and_include_fragment(&feature, &qualifier, target_file, fragments, invar_config)).await?;
                     continue;
                 }
             }
@@ -396,7 +412,8 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             debug!("Bolt kind: {:?}", bolt.kind_name());
             if let BoltKind::Config = bolt.kind {
                 let thundercloud_fs = self.0.thundercloud_file_system();
-                let project_fs = self.0.thundercloud_file_system();
+                let project_fs = self.0.project_file_system();
+                debug!("Bolt context: {:?}", bolt.context());
                 let bolt_invar_config_body = match bolt.context() {
                     ThunderCloud => get_invar_config_body(bolt.source(), &thundercloud_fs).await?,
                     Project => get_invar_config_body(bolt.source(), &project_fs).await?,

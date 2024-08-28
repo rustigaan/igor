@@ -137,6 +137,7 @@ impl FileSystem for FixtureFileSystem {
     }
 
     async fn open_source(&self, file_path: AbsolutePath) -> Result<impl SourceFile> {
+        debug!("Open source: {:?}", &file_path);
         let file_entry = self.find_entry(&file_path, |_,_| Ok(None)).await?;
         if file_entry.is_dir().await? {
             Err(anyhow!("Trying to read lines from a directory: {:?}", file_path))
