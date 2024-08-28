@@ -1,6 +1,7 @@
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use anyhow::{anyhow, Result};
+use verbatim::PathExt;
 
 #[derive(Debug, Clone)]
 pub struct AbsolutePath(PathBuf);
@@ -31,6 +32,7 @@ impl AbsolutePath {
     pub fn push(&mut self, path: impl Into<RelativePath>) -> () {
         let relative_path = path.into();
         self.0.push(relative_path.0);
+        self.0 = self.0.to_verbatim();
     }
 }
 

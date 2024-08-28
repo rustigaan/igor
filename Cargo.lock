@@ -426,6 +426,7 @@ dependencies = [
  "test-log",
  "tokio",
  "tokio-stream",
+ "verbatim",
 ]
 
 [[package]]
@@ -914,6 +915,12 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
+
+[[package]]
+name = "verbatim"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbad0679079b451226e954019b2efac46bafa8f7b1418b953861e864072a97c6"
 
 [[package]]
 name = "version_check"
