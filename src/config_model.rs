@@ -28,6 +28,9 @@ mod git_remote_config;
 pub use git_remote_config::GitRemoteConfig;
 mod git_remote_config_data;
 
+pub mod psychotropic;
+mod psychotropic_data;
+
 use anyhow::Result;
 use std::borrow::Cow;
 use std::fmt::Debug;

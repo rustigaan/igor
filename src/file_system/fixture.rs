@@ -91,6 +91,15 @@ impl FileSystem for FixtureFileSystem {
         Ok(Box::pin(entries))
     }
 
+    async fn path_type(&self, path: &AbsolutePath) -> PathType {
+        let Ok(entry) = self.find_entry(path, |_,_| Ok(None)).await else { return PathType::Missing };
+        if entry.is_dir {
+            PathType::Directory
+        } else {
+            PathType::File
+        }
+    }
+
     async fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> Result<Option<impl TargetFile>> {
         if write_mode == Ignore {
             return Ok(None);

@@ -3,7 +3,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 use anyhow::{Result,anyhow};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::fs::{DirBuilder, DirEntry as TokioDirEntry, File, OpenOptions};
+use tokio::fs::{metadata, DirBuilder, DirEntry as TokioDirEntry, File, OpenOptions};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
@@ -48,6 +48,17 @@ impl FileSystem for RealFileSystem {
         let entries = tokio::fs::read_dir(&directory as &Path).await
             .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
         Ok(ReadDirStream::new(entries).map(move |item| item.map_err(|e| anyhow!(format!("error traversing {:?}: {:?}", &directory, e)))))
+    }
+
+    async fn path_type(&self, path: &AbsolutePath) -> PathType {
+        let Ok(path_metadata) = metadata(path.as_path()).await else { return PathType::Missing };
+        if path_metadata.is_dir() {
+            return PathType::Directory;
+        }
+        if path_metadata.is_file() {
+            return PathType::File;
+        }
+        PathType::Other
     }
 
     async fn open_target(&self, target_file: AbsolutePath, write_mode: WriteMode) -> Result<Option<impl TargetFile>> {

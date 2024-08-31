@@ -17,6 +17,9 @@ mod fixture;
 #[cfg(test)]
 pub use fixture::fixture_file_system;
 
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum PathType { Missing, File, Directory, Other }
+
 #[derive(Debug, Clone)]
 struct ReadOnlyFileSystem<FS: FileSystem>(FS);
 
@@ -38,6 +41,7 @@ pub trait SourceFile: Send + Sync {
 pub trait FileSystem: Debug + Send + Sync + Sized + Clone {
     type DirEntryItem: DirEntry;
     fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync + Unpin>> + Send;
+    fn path_type(&self, path: &AbsolutePath) -> impl Future<Output = PathType> + Send;
     fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> impl Future<Output = Result<Option<impl TargetFile>>> + Send;
     fn open_source(&self, file_path: AbsolutePath) -> impl Future<Output = Result<impl SourceFile>> + Send;
     fn read_only(self) -> impl FileSystem {
@@ -63,6 +67,10 @@ impl<FS: FileSystem> FileSystem for ReadOnlyFileSystem<FS> {
 
     fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output=Result<impl Stream<Item=Result<Self::DirEntryItem>> + Send + Sync>> + Send {
         self.0.read_dir(directory)
+    }
+
+    async fn path_type(&self, path: &AbsolutePath) -> PathType {
+        self.0.path_type(path).await
     }
 
     async fn open_target(&self, _file_path: AbsolutePath, _write_mode: WriteMode) -> Result<Option<impl TargetFile>> {

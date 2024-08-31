@@ -12,7 +12,7 @@ This vendoring tool is similar. It offers inversion-of-control in vendoring depe
 
 2. Igor watches thundercloud projects that provide lightning: files and fragments of files that can be injected into projects of marthters.
 
-3. When files change is thundercloud projects, Igor updates all the projects that declare the corresponding niche (unless opted out in `yeth-marthter/nicheName/igor-thettingth.yaml`). If the settings file declares a build command, that is also run after the bolt of lightning hit the niche.
+3. When files change in thundercloud projects, Igor updates all the projects that declare the corresponding niche (unless opted out in `yeth-marthter/nicheName/igor-thettingth.yaml`). If the settings file declares a build command, that is also run after the bolt of lightning hit the niche.
 
 It is also possible to have Igor apply selected thundercloud projects to a marthterth' project.
 
@@ -43,6 +43,26 @@ The replacement of a placeholder is always a placeholder with the same ID.
 Special feature `@` is implicitly selected and cannot be turned off.
 
 Names like featureName and placeholderName must begin with an alphabetic character or an underscore and may only contain alphabetic characters, underscores and numerical digits.
+
+## Configuration
+
+### Psychotropic
+
+Sometimes thunderclouds should not flash asynchronously at random. Just like in Überwald, the weather needs to be psychotropic. ("If you say something like 'zer dark eyes of zer mind', there would be a sudden crash of thunder"; see [Überwald in L-space](https://wiki.lspace.org/%C3%9Cberwald)).
+
+Therefore, it is allowed to place a file named `psychotropic.yaml` in `yeth-marthter/` that declares which niches must wait for each other. For example:
+
+```yaml
+cues:
+  - name: default-settings
+  - name: mongo-db
+    wait-for:
+      - default-settings
+```
+
+This specifies that niche `mongo-db` should not be processed before niche `default-settings` has finished.
+
+Property `cues` is an ordered list of niches. Each niche has a `name` and a list of names of niches to `wait-for`. Each name in `wait-for` has to appear as the `name` of a niche earlier in the list. The same `name` is not allowed to appear more than once. (These rules prevent cycles that would cause niches to wait for each other indefinitely).
 
 ## Examples
 

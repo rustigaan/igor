@@ -7,8 +7,8 @@ use super::use_thundercloud_config_data::UseThundercloudConfigData;
 use crate::path::AbsolutePath;
 
 #[derive(Deserialize,Debug)]
+#[serde(rename_all = "kebab-case")]
 pub struct NicheConfigData {
-    #[serde(rename = "use-thundercloud")]
     use_thundercloud: UseThundercloudConfigData,
 }
 

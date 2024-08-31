@@ -7,8 +7,8 @@ use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 
 #[derive(Deserialize,Debug,Clone)]
+#[serde(rename_all = "kebab-case")]
 pub struct InvarConfigData {
-    #[serde(rename = "write-mode")]
     write_mode: Option<WriteMode>,
     interpolate: Option<bool>,
     props: Option<Mapping>,

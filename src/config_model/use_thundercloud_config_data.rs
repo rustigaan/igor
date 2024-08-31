@@ -6,14 +6,12 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 
 #[derive(Deserialize,Debug,Clone)]
+#[serde(rename_all = "kebab-case")]
 pub struct UseThundercloudConfigData {
     directory: Option<String>,
-    #[serde(rename = "git-remote")]
     git_remote: Option<GitRemoteConfigData>,
-    #[serde(rename = "on-incoming")]
     on_incoming: Option<OnIncoming>,
     features: Option<Vec<String>>,
-    #[serde(rename = "invar-defaults")]
     invar_defaults: Option<InvarConfigData>,
 }
 

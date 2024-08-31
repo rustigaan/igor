@@ -14,6 +14,7 @@ mod thundercloud;
 use niche::process_niche;
 use crate::file_system::FileSystem;
 use crate::path::AbsolutePath;
+use crate::config_model::psychotropic;
 
 #[derive(Parser,Debug)]
 #[command(version, about, long_about = None)]
@@ -35,8 +36,14 @@ pub async fn application() -> Result<()> {
     let project_root_path = arguments.project_root.unwrap_or(PathBuf::from("."));
     let project_root = AbsolutePath::new(project_root_path, &cwd);
     let niches_directory= AbsolutePath::new("yeth-marthter", &project_root);
-    info!("Niche configuration directory: {niches_directory:?}");
+    info!("Niches configuration directory: {niches_directory:?}");
+
     let fs = file_system::real_file_system();
+
+    let psychotropic_path = AbsolutePath::new("psychotropic.yaml", &niches_directory);
+    let psychotropic_config = psychotropic::from_path(&psychotropic_path, &fs).await?;
+    info!("Psychotropic configuration: {psychotropic_config:?}");
+
     let mut niches = fs.read_dir(&niches_directory).await?;
     let mut handles = Vec::new();
     loop {
