@@ -2,7 +2,7 @@
 
 Intro.
 
-* Mathtur: ${mathtur}
+* Marthter: ${marthter}
 * Buyer: ${buyer}
 * Milk man: ${milk-man}
 

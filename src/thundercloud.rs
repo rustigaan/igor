@@ -815,7 +815,7 @@ mod test {
     }
 
     async fn create_niche_config<FS: FileSystem>(fs: FS) -> Result<impl NicheConfig> {
-        let source_file = fs.open_source(to_absolute_path("/yeth-mathtur/example/igor-thettingth.yaml")).await?;
+        let source_file = fs.open_source(to_absolute_path("/yeth-marthter/example/igor-thettingth.yaml")).await?;
         let body = body(source_file).await?;
         Ok(niche_config::test_utils::from_string(body)?)
     }
@@ -823,7 +823,7 @@ mod test {
     async fn create_thunder_config<'a, NC: NicheConfig, TFS: FileSystem + 'a, PFS: FileSystem + 'a>(niche_configuration: &'a NC, thundercloud_fs: TFS, project_fs: PFS) -> Result<impl ThunderConfig + 'a> {
         let project_root = to_absolute_path("/");
         let thundercloud_directory = to_absolute_path("/example-thundercloud");
-        let invar_directory = to_absolute_path("/yeth-mathtur/example/invar");
+        let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
         let thunder_config = niche_configuration.new_thunder_config(thundercloud_fs, thundercloud_directory, project_fs, invar_directory, project_root);
         Ok(thunder_config)
     }
@@ -881,7 +881,7 @@ mod test {
 
     fn create_project_file_system_fixture() -> Result<impl FileSystem> {
         let yaml = indoc! {r#"
-                yeth-mathtur:
+                yeth-marthter:
                     example:
                         igor-thettingth.yaml: |
                             ---
@@ -894,7 +894,7 @@ mod test {
                                 - kermie
                               invar-defaults:
                                 props:
-                                  mathtur: Jeremy
+                                  marthter: Jeremy
                                   buyer: Myra LeJean
                                   milk-man: Kaos
                         invar:
@@ -923,7 +923,7 @@ mod test {
 
                                     The details of this project.
 
-                                    * Mathtur: ${mathtur}
+                                    * Marthter: ${marthter}
                                     * Buyer: ${buyer}
                                     * Milk man: ${milk-man}
                                     * Undefined: ${undefined}

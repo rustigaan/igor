@@ -22,7 +22,7 @@ struct Arguments {
     #[arg(short, long)]
     project_root: Option<PathBuf>,
 
-    /// Location of the directory that specifies the niches to fill (default: PROJECT_ROOT/yeth-mathtur)
+    /// Location of the directory that specifies the niches to fill (default: PROJECT_ROOT/yeth-marthter)
     #[arg(short, long, value_name = "DIRECTORY")]
     niches: Option<PathBuf>,
 }
@@ -34,7 +34,7 @@ pub async fn application() -> Result<()> {
     let cwd = AbsolutePath::current_dir()?;
     let project_root_path = arguments.project_root.unwrap_or(PathBuf::from("."));
     let project_root = AbsolutePath::new(project_root_path, &cwd);
-    let niches_directory= AbsolutePath::new("yeth-mathtur", &project_root);
+    let niches_directory= AbsolutePath::new("yeth-marthter", &project_root);
     info!("Niche configuration directory: {niches_directory:?}");
     let fs = file_system::real_file_system();
     let mut niches = fs.read_dir(&niches_directory).await?;

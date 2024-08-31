@@ -8,15 +8,15 @@ Every Igor has had (and has executed) many surgeries, has many visible scars and
 
 This vendoring tool is similar. It offers inversion-of-control in vendoring dependencies. What is that supposed to mean, you might ask. Well, in a nutshell it works like this:
 
-1. A project declares the niches it wants to be served by an Igor in a directory named `yeth-mathtur` (the strange spelling is caused by the lisp). For each niche there is a subdirectory with a name that matches the name of the niche that contains at least a file named `igor-thettingth.yaml` that specifies the name of the thundercloud project that provides lightning for this niche. File `igor-thettingth.yaml` can also be used to turn features on and off and otherwise change the process. The niche directory may contain additional files that complement or override files and fragments that are injected by Igor.
+1. A project declares the niches it wants to be served by an Igor in a directory named `yeth-marthter` (the strange spelling is caused by the lisp). For each niche there is a subdirectory with a name that matches the name of the niche that contains at least a file named `igor-thettingth.yaml` that specifies the name of the thundercloud project that provides lightning for this niche. File `igor-thettingth.yaml` can also be used to turn features on and off and otherwise change the process. The niche directory may contain additional files that complement or override files and fragments that are injected by Igor.
 
-2. Igor watches thundercloud projects that provide lightning: files and fragments of files that can be injected into projects of mathturs.
+2. Igor watches thundercloud projects that provide lightning: files and fragments of files that can be injected into projects of marthters.
 
-3. When files change is thundercloud projects, Igor updates all the projects that declare the corresponding niche (unless opted out in `yeth-mathtur/nicheName/igor-thettingth.yaml`). If the settings file declares a build command, that is also run after the bolt of lightning hit the niche.
+3. When files change is thundercloud projects, Igor updates all the projects that declare the corresponding niche (unless opted out in `yeth-marthter/nicheName/igor-thettingth.yaml`). If the settings file declares a build command, that is also run after the bolt of lightning hit the niche.
 
-It is also possible to have Igor apply selected thundercloud projects to a mathturth' project.
+It is also possible to have Igor apply selected thundercloud projects to a marthterth' project.
 
-Filenames in both the thundercloud projects and in the `yeth-mathtur/nicheName` directories of mathturth' projects are qualified with an infix before the last dot to denote their function.
+Filenames in both the thundercloud projects and in the `yeth-marthter/nicheName` directories of marthterth' projects are qualified with an infix before the last dot to denote their function.
 
 * Option: `basename+option-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file
 * Example: `basename+example-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file and the file does not exist
@@ -55,13 +55,13 @@ Examples of lightning files:
 * `Cargo-fragment+tokio-build_deps.toml` replaces placeholder `build_deps` in `Cargo.toml` if feature `tokio` is selected
 * `main-ignore+niche.rs` ignores all lightning instructions from this niche for `main.rs`
 
-Minimal settings file `yeth-mathtur/async-rust/igor-thettingth.yaml`:
+Minimal settings file `yeth-marthter/async-rust/igor-thettingth.yaml`:
 ```yaml
 thundercloud:
   directory: "{{WORKAREA}}/async-rust-igor-thundercloud"
 ```
 
-Elaborate settings file `yeth-mathtur/dendrite/igor-thettingth.yaml`
+Elaborate settings file `yeth-marthter/dendrite/igor-thettingth.yaml`
 ```yaml
 %YAML 1.2
 ---
@@ -71,7 +71,7 @@ type:
 thundercloud:
   git:
     remote: "git@github.com:rustigaan/dendrite-igor-thundercloud.git"
-    revision: mathtur
+    revision: marthter
     on-incoming: warn # update | ignore | warn | fail
 options:
   selected:

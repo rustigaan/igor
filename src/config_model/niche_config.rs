@@ -63,7 +63,7 @@ pub mod test {
                     write-mode: Ignore
                     interpolate: false
                     props:
-                      mathtur: Jeremy
+                      marthter: Jeremy
                       buyer: Myra LeJean
                       milk-man: Kaos
             "#};
@@ -84,7 +84,7 @@ pub mod test {
         assert_eq!(invar_defaults.interpolate_option(), Some(false));
 
         let mut mapping = Mapping::new();
-        insert_entry(&mut mapping, "mathtur", "Jeremy");
+        insert_entry(&mut mapping, "marthter", "Jeremy");
         insert_entry(&mut mapping, "buyer", "Myra LeJean");
         insert_entry(&mut mapping, "milk-man", "Kaos");
         assert_eq!(invar_defaults.props().into_owned(), mapping);
