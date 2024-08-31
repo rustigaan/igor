@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use log::{error, info};
+use tokio_stream::StreamExt;
 
 mod config_model;
 mod file_system;
@@ -11,6 +12,8 @@ mod path;
 mod thundercloud;
 
 use niche::process_niche;
+use crate::file_system::FileSystem;
+use crate::path::AbsolutePath;
 
 #[derive(Parser,Debug)]
 #[command(version, about, long_about = None)]
@@ -28,24 +31,23 @@ pub async fn application() -> Result<()> {
     info!("Igor started");
 
     let arguments = Arguments::parse();
-    let project_root = arguments.project_root.unwrap_or(PathBuf::from("."));
-    let niches_directory = arguments.niches.unwrap_or_else(|| {
-        let mut path_buf = PathBuf::from(project_root.clone());
-        path_buf.push("yeth-mathtur");
-        path_buf
-    });
+    let cwd = AbsolutePath::current_dir()?;
+    let project_root_path = arguments.project_root.unwrap_or(PathBuf::from("."));
+    let project_root = AbsolutePath::new(project_root_path, &cwd);
+    let niches_directory= AbsolutePath::new("yeth-mathtur", &project_root);
     info!("Niche configuration directory: {niches_directory:?}");
-    let mut niches = tokio::fs::read_dir(&niches_directory).await?;
+    let fs = file_system::real_file_system();
+    let mut niches = fs.read_dir(&niches_directory).await?;
     let mut handles = Vec::new();
     loop {
-        let niche = niches.next_entry().await;
+        let niche = niches.next().await;
         let handle = match niche {
-            Ok(None) => None,
-            Ok(Some(entry)) => {
+            None => None,
+            Some(Ok(entry)) => {
                 info!("Niche configuration entry: {entry:?}");
                 Some(tokio::spawn(process_niche(project_root.clone(), niches_directory.clone(), entry)))
             }
-            Err(err) => {
+            Some(Err(err)) => {
                 error!("Error while reading niche directory entry: {err:?}");
                 None
             }

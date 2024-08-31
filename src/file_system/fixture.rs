@@ -78,7 +78,7 @@ impl SourceFile for FixtureSourceFile {
 impl FileSystem for FixtureFileSystem {
     type DirEntryItem = Arc<FixtureEntry>;
 
-    async fn read_dir(&self, directory: &AbsolutePath) -> Result<impl Stream<Item=Result<Self::DirEntryItem>> + Send + Sync> {
+    async fn read_dir(&self, directory: &AbsolutePath) -> Result<impl Stream<Item=Result<Self::DirEntryItem>> + Send + Sync + Unpin> {
         let entries = stream! {
             let dir_entry = self.find_entry(directory, |_,_| Ok(None)).await?;
             if let DirFixtureContent { entries, .. } = &dir_entry.content {
@@ -88,7 +88,7 @@ impl FileSystem for FixtureFileSystem {
                 }
             }
         };
-        Ok(entries)
+        Ok(Box::pin(entries))
     }
 
     async fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> Result<Option<impl TargetFile>> {
@@ -287,7 +287,7 @@ impl From<FixtureEnum> for FixtureFileSystem {
 }
 
 fn convert_enum(parent_path: &AbsolutePath, file_name: &str, data: Box<FixtureEnum>) -> FixtureEntry {
-    let this_path = AbsolutePath::new(PathBuf::from(file_name), &parent_path);
+    let this_path = AbsolutePath::new(file_name, &parent_path);
     match *data {
         FixtureEnum::File(body) => {
             let body_iter = BufReader::new(StringReader::new(&body)).lines();
@@ -334,6 +334,7 @@ mod test {
     use test_log::test;
     use tokio_stream::StreamExt;
     use crate::config_model::WriteMode::WriteNew;
+    use crate::path::test_utils::to_absolute_path;
     use super::*;
 
     #[test]
@@ -375,7 +376,7 @@ mod test {
         let root = AbsolutePath::try_new(PathBuf::from("/"))?;
 
         // When
-        let mut source_file = fs.open_source(AbsolutePath::new(PathBuf::from("top-dir/sub-dir/file"), &root)).await?;
+        let mut source_file = fs.open_source(AbsolutePath::new("top-dir/sub-dir/file", &root)).await?;
 
         // Then
         let Some(first_line) = source_file.next_line().await? else { bail!("File is empty") };
@@ -617,11 +618,6 @@ mod test {
     }
 
     // Utilities
-
-    fn to_absolute_path<S: Into<String>>(path: S) -> AbsolutePath {
-        let root = AbsolutePath::try_new(PathBuf::from("/")).unwrap();
-        AbsolutePath::new(PathBuf::from(path.into()), &root)
-    }
 
     fn create_test_fixture_file_system() -> Result<impl FileSystem> {
         let yaml = indoc! {r#"

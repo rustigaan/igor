@@ -2,6 +2,7 @@ use super::niche_config_data::NicheConfigData;
 
 use std::fmt::Debug;
 use std::io::Read;
+use stringreader::StringReader;
 use crate::config_model::{ThunderConfig, UseThundercloudConfig};
 use crate::file_system::FileSystem;
 use crate::path::AbsolutePath;
@@ -16,6 +17,10 @@ use super::*;
 pub fn from_reader<R: Read>(reader: R) -> Result<impl NicheConfig> {
     let config: NicheConfigData = NicheConfig::from_reader(reader)?;
     Ok(config)
+}
+
+pub fn from_string(body: String) -> Result<impl NicheConfig> {
+    NicheConfigData::from_reader(StringReader::new(&body))
 }
 
 #[cfg(test)]
@@ -39,7 +44,6 @@ pub mod test {
     use indoc::indoc;
     use log::debug;
     use serde_yaml::Mapping;
-    use std::path::PathBuf;
     use stringreader::StringReader;
     use crate::file_system::fixture_file_system;
 
@@ -100,7 +104,7 @@ pub mod test {
         let thunder_cloud_dir = AbsolutePath::try_from("/tmp")?;
         let invar_dir = AbsolutePath::try_from("/var/tmp")?;
         let project_root = AbsolutePath::try_from("/")?;
-        let cumulus = AbsolutePath::new(PathBuf::from("cumulus"), &thunder_cloud_dir);
+        let cumulus = AbsolutePath::new("cumulus", &thunder_cloud_dir);
         let fs = fixture_file_system(StringReader::new("{}"))?;
 
         // When

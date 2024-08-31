@@ -1,3 +1,4 @@
+use std::env;
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use anyhow::{anyhow, Result};
@@ -13,7 +14,8 @@ pub struct RelativePath(PathBuf);
 pub struct SingleComponent(PathBuf);
 
 impl AbsolutePath {
-    pub fn new(path: PathBuf, reference: &AbsolutePath) -> Self {
+    pub fn new<PB: Into<PathBuf>>(path: PB, reference: &AbsolutePath) -> Self {
+        let path = path.into();
         if path.is_absolute() {
             AbsolutePath(path)
         } else {
@@ -27,6 +29,10 @@ impl AbsolutePath {
         } else {
             Err(anyhow!("Not an absolute path: {path:?}"))
         }
+    }
+
+    pub fn current_dir() -> Result<Self> {
+        Ok(AbsolutePath(env::current_dir()?))
     }
 
     pub fn push(&mut self, path: impl Into<RelativePath>) -> () {
@@ -177,6 +183,6 @@ pub mod test_utils {
 
     pub fn to_absolute_path<S: Into<String>>(path: S) -> AbsolutePath {
         let root = AbsolutePath::try_new(PathBuf::from("/")).unwrap();
-        AbsolutePath::new(PathBuf::from(path.into()), &root)
+        AbsolutePath::new(path.into(), &root)
     }
 }

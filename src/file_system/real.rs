@@ -170,7 +170,7 @@ mod test {
         let tmp_dir = TempDir::new()?;
         let fs = real_file_system();
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
-        let file_path = AbsolutePath::new(PathBuf::from("non-empty"), &path);
+        let file_path = AbsolutePath::new("non-empty", &path);
         File::create(&file_path.as_path()).await?;
 
         // When
@@ -197,7 +197,7 @@ mod test {
         let tmp_dir = TempDir::new()?;
         let fs = real_file_system();
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
-        let file_path = AbsolutePath::new(PathBuf::from("content"), &path);
+        let file_path = AbsolutePath::new("content", &path);
 
         let target_file = fs.open_target(file_path.clone(), WriteMode::Overwrite).await?.unwrap();
         target_file.write_line("First line.").await?;
@@ -224,7 +224,7 @@ mod test {
         let tmp_dir = TempDir::new()?;
         let fs = real_file_system();
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
-        let file_path = AbsolutePath::new(PathBuf::from("content"), &path);
+        let file_path = AbsolutePath::new("content", &path);
 
         if let Some(_) = fs.open_target(file_path.clone(), WriteMode::Ignore).await? {
             assert_eq!(true, false);
@@ -237,7 +237,7 @@ mod test {
         let tmp_dir = TempDir::new()?;
         let fs = real_file_system();
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
-        let file_path = AbsolutePath::new(PathBuf::from("content"), &path);
+        let file_path = AbsolutePath::new("content", &path);
 
         if let Some(target_file) = fs.open_target(file_path.clone(), WriteMode::WriteNew).await? {
             target_file.write_line("Some line.").await?;

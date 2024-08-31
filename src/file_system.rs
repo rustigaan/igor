@@ -37,7 +37,7 @@ pub trait SourceFile: Send + Sync {
 
 pub trait FileSystem: Debug + Send + Sync + Sized + Clone {
     type DirEntryItem: DirEntry;
-    fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync>> + Send;
+    fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync + Unpin>> + Send;
     fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> impl Future<Output = Result<Option<impl TargetFile>>> + Send;
     fn open_source(&self, file_path: AbsolutePath) -> impl Future<Output = Result<impl SourceFile>> + Send;
     fn read_only(self) -> impl FileSystem {
