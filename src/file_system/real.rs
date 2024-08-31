@@ -216,10 +216,10 @@ mod test {
         let mut target_file_mut = target_file;
         target_file_mut.close().await?;
         if let Ok(_) = target_file_mut.write_line("Post close.").await {
-            assert_eq!(true, false);
+            assert!(false, "Writing line after closing a target file should not be possible");
         }
         if let Ok(_) = target_file_mut.close().await {
-            assert_eq!(true, false);
+            assert!(false);
         }
 
         let mut source_file = fs.open_source(file_path).await?;
@@ -238,7 +238,7 @@ mod test {
         let file_path = AbsolutePath::new("content", &path);
 
         if let Some(_) = fs.open_target(file_path.clone(), WriteMode::Ignore).await? {
-            assert_eq!(true, false);
+            assert!(false, "Opening an ignored target should return None");
         }
         Ok(())
     }
@@ -250,15 +250,18 @@ mod test {
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
         let file_path = AbsolutePath::new("content", &path);
 
+        assert_eq!(fs.path_type(&path).await, PathType::Directory);
+        assert_eq!(fs.path_type(&file_path).await, PathType::Missing);
         if let Some(target_file) = fs.open_target(file_path.clone(), WriteMode::WriteNew).await? {
             target_file.write_line("Some line.").await?;
             let mut target_file_mut = target_file;
             target_file_mut.close().await?;
         } else {
-            assert_eq!(true, false);
+            assert!(false, "Could not open target file");
         }
+        assert_eq!(fs.path_type(&file_path).await, PathType::File);
         if let Some(_) = fs.open_target(file_path.clone(), WriteMode::WriteNew).await? {
-            assert_eq!(true, false);
+            assert!(false, "Opening an existing file with WriteNew should not be possible");
         }
         Ok(())
     }
