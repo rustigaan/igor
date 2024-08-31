@@ -101,7 +101,7 @@ pub mod test {
         let invar_dir = AbsolutePath::try_from("/var/tmp")?;
         let project_root = AbsolutePath::try_from("/")?;
         let cumulus = AbsolutePath::new(PathBuf::from("cumulus"), &thunder_cloud_dir);
-        let fs = fixture_file_system(StringReader::new(""))?;
+        let fs = fixture_file_system(StringReader::new("{}"))?;
 
         // When
         let thunder_config = niche_config.new_thunder_config(fs.clone(), thunder_cloud_dir.clone(), fs.clone(), invar_dir.clone(), project_root.clone());
