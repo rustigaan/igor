@@ -262,10 +262,6 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
     async fn generate_file<IC>(&self, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IC) -> Result<()>
     where IC: InvarConfig
     {
-        if bolts.is_empty() {
-            debug!("Skip: {:?}: {:?}", target_path, &bolts);
-            return Ok(())
-        }
         let option =
             if let Some(option) = option {
                 option

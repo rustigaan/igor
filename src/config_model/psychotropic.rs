@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::fmt::Debug;
 use std::io::Read;
 use anyhow::Result;
@@ -9,14 +8,14 @@ use crate::file_system::{source_file_to_string, FileSystem, PathType};
 use crate::path::AbsolutePath;
 
 pub trait NicheCue: Debug {
-    fn name(&self) -> OsString;
-    fn wait_for(&self) -> &[OsString];
+    fn name(&self) -> String;
+    fn wait_for(&self) -> &[String];
 }
 
 pub trait PsychotropicConfig: Debug + Sized {
     type NicheCueImpl: NicheCue;
 
-    fn get(&self, key: &OsString) -> Option<&impl NicheCue>;
+    fn get(&self, key: &String) -> Option<&impl NicheCue>;
 }
 
 pub fn from_reader<R: Read>(reader: R) -> Result<impl PsychotropicConfig> {

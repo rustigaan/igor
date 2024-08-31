@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use anyhow::{anyhow, Result};
 use ahash::AHashMap;
 use serde::Deserialize;
@@ -7,16 +6,17 @@ use super::psychotropic::{NicheCue, PsychotropicConfig};
 #[derive(Deserialize,Debug)]
 #[serde(rename_all = "kebab-case")]
 pub struct NicheCueData {
-    name: OsString,
-    wait_for: Vec<OsString>,
+    name: String,
+    #[serde(default)]
+    wait_for: Vec<String>,
 }
 
 impl NicheCue for NicheCueData {
-    fn name(&self) -> OsString {
+    fn name(&self) -> String {
         self.name.clone()
     }
 
-    fn wait_for(&self) -> &[OsString] {
+    fn wait_for(&self) -> &[String] {
         &self.wait_for
     }
 }
@@ -27,12 +27,12 @@ pub struct PsychotropicConfigData {
 }
 
 #[derive(Debug)]
-pub struct PsychotropicConfigIndex(AHashMap<OsString,NicheCueData>);
+pub struct PsychotropicConfigIndex(AHashMap<String,NicheCueData>);
 
 impl PsychotropicConfig for PsychotropicConfigIndex {
     type NicheCueImpl = NicheCueData;
 
-    fn get(&self, key: &OsString) -> Option<&impl NicheCue> {
+    fn get(&self, key: &String) -> Option<&impl NicheCue> {
         self.0.get(key)
     }
 }
