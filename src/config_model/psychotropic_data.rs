@@ -32,8 +32,12 @@ pub struct PsychotropicConfigIndex(AHashMap<String,NicheCueData>);
 impl PsychotropicConfig for PsychotropicConfigIndex {
     type NicheCueImpl = NicheCueData;
 
-    fn get(&self, key: &String) -> Option<&impl NicheCue> {
+    fn get(&self, key: &str) -> Option<&impl NicheCue> {
         self.0.get(key)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
