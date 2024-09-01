@@ -7,15 +7,16 @@ use super::psychotropic_data::{data_to_index, empty, PsychotropicConfigData, Psy
 use crate::file_system::{source_file_to_string, FileSystem, PathType};
 use crate::path::AbsolutePath;
 
-pub trait NicheCue: Debug {
+pub trait NicheTriggers: Debug {
     fn name(&self) -> String;
     fn wait_for(&self) -> &[String];
+    fn triggers(&self) -> &[String];
 }
 
 pub trait PsychotropicConfig: Debug + Sized {
-    type NicheCueImpl: NicheCue;
+    type NicheTriggersImpl: NicheTriggers;
 
-    fn get(&self, key: &str) -> Option<&impl NicheCue>;
+    fn get(&self, key: &str) -> Option<&impl NicheTriggers>;
     fn is_empty(&self) -> bool;
 }
 
@@ -69,7 +70,9 @@ mod test {
 
         // Then
         assert_eq!(result.get("example").unwrap().wait_for(), Vec::<&str>::new());
+        assert_eq!(result.get("example").unwrap().triggers(), vec!["non-existent"]);
         assert_eq!(result.get("non-existent").unwrap().wait_for(), vec!["example"]);
+        assert_eq!(result.get("non-existent").unwrap().triggers(), Vec::<&str>::new());
 
         Ok(())
     }
@@ -104,8 +107,11 @@ mod test {
 
         // Then
         assert_eq!(result.get("default-settings").unwrap().wait_for(), Vec::<&str>::new());
+        assert_eq!(result.get("default-settings").unwrap().triggers(), Vec::<&str>::new());
         assert_eq!(result.get("example").unwrap().wait_for(), Vec::<&str>::new());
+        assert_eq!(result.get("example").unwrap().triggers(), vec!["non-existent"]);
         assert_eq!(result.get("non-existent").unwrap().wait_for(), vec!["example"]);
+        assert_eq!(result.get("non-existent").unwrap().triggers(), Vec::<&str>::new());
 
         Ok(())
     }
