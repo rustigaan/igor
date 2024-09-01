@@ -45,7 +45,8 @@ pub fn data_to_index(data: PsychotropicConfigData) -> Result<PsychotropicConfigI
         }
         for dep in cue.wait_for() {
             if !index.contains_key(dep) {
-                return Err(anyhow!("Wait for {:?} must appear before {:?} in psychotropic config", &dep, &cue.name))
+                let trivial = NicheCueData { name: dep.clone(), wait_for: Vec::new() };
+                index.insert(dep.clone(), trivial);
             }
         }
         index.insert(cue.name().to_string(), cue);

@@ -62,7 +62,28 @@ cues:
 
 This specifies that niche `mongo-db` should not be processed before niche `default-settings` has finished.
 
-Property `cues` is an ordered list of niches. Each niche has a `name` and a list of names of niches to `wait-for`. Each name in `wait-for` has to appear as the `name` of a niche earlier in the list. The same `name` is not allowed to appear more than once. (These rules prevent cycles that would cause niches to wait for each other indefinitely).
+Property `cues` is an ordered list of niches. Each niche has a `name` and a list of names of niches to `wait-for`. Each name in `wait-for` has to appear (or is assumed to appear) as the `name` of a niche earlier in the list. The same `name` is not allowed to appear (or assumed to appear) more than once. (These rules prevent cycles that would cause niches to wait for each other indefinitely).
+
+So this is okay:
+
+```yaml
+cues:
+  - name: mongo-db
+    wait-for:
+      - default-settings
+```
+
+This is not, however:
+
+```yaml
+cues:
+  - name: mongo-db
+    wait-for:
+      - default-settings
+  - name: default-settings
+```
+
+The reason being that `default-settings` is assumed to appear before `mongo-db`, therefore it cannot appear after `mongo-db`.
 
 ## Examples
 
