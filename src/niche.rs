@@ -2,14 +2,13 @@ use anyhow::Result;
 use ahash::AHashMap;
 use log::{debug, info};
 use crate::config_model::{niche_config, NicheConfig, UseThundercloudConfig};
-use crate::file_system::{source_file_to_string, DirEntry, FileSystem};
+use crate::file_system::{source_file_to_string, FileSystem};
 use crate::interpolate;
 use crate::thundercloud;
 use crate::path::AbsolutePath;
 
-pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niches_directory: AbsolutePath, entry: FS::DirEntryItem, fs: FS) -> Result<()> {
+pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niche_directory: AbsolutePath, fs: FS) -> Result<()> {
     let work_area = AbsolutePath::new("..", &project_root);
-    let niche_directory = AbsolutePath::new(entry.file_name(), &niches_directory);
     let config = get_config(&niche_directory, &fs).await?;
     if let Some(directory) = config.use_thundercloud().directory() {
         info!("Directory: {directory:?}");
@@ -54,12 +53,10 @@ async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, fs: &FS) -> 
 
 #[cfg(test)]
 mod test {
-    use anyhow::bail;
     use indoc::indoc;
     use log::trace;
     use stringreader::StringReader;
     use test_log::test;
-    use tokio_stream::StreamExt;
     use crate::file_system::{fixture_file_system, FileSystem};
     use crate::path::test_utils::to_absolute_path;
     use super::*;
@@ -70,15 +67,10 @@ mod test {
         let fs = create_file_system_fixture()?;
 
         let project_root = to_absolute_path("/");
-        let niches_directory = to_absolute_path("/yeth-marthter");
-
-        let Some(Ok(entry)) = fs.read_dir(&niches_directory).await?.next().await else {
-            bail!("No entry in niches directory")
-        };
-        assert_eq!(entry.file_name(), "example");
+        let niche = to_absolute_path("/yeth-marthter/example");
 
         // When
-        process_niche(project_root, niches_directory, entry, fs.clone()).await?;
+        process_niche(project_root, niche, fs.clone()).await?;
 
         // Then
         let source_file = fs.open_source(to_absolute_path("/workshop/clock.yaml")).await?;

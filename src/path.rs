@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{anyhow, Result};
 use log::debug;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AbsolutePath(PathBuf);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]

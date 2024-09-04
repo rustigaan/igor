@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::io::Read;
+use ahash::AHashSet;
 use anyhow::Result;
 use log::debug;
 use stringreader::StringReader;
@@ -16,8 +17,10 @@ pub trait NicheTriggers: Debug {
 pub trait PsychotropicConfig: Debug + Sized {
     type NicheTriggersImpl: NicheTriggers;
 
-    fn get(&self, key: &str) -> Option<&impl NicheTriggers>;
+    fn independent(&self) -> AHashSet<String>;
+    fn get(&self, key: &str) -> Option<&Self::NicheTriggersImpl>;
     fn is_empty(&self) -> bool;
+    fn values(&self) -> Vec<Self::NicheTriggersImpl>;
 }
 
 pub fn from_reader<R: Read>(reader: R) -> Result<impl PsychotropicConfig> {

@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Result};
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
+use log::debug;
 use serde::Deserialize;
 use super::psychotropic::{NicheTriggers, PsychotropicConfig};
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct NicheCueData {
     name: String,
@@ -26,7 +27,7 @@ pub struct PsychotropicConfigData {
     cues: Vec<NicheCueData>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NicheTriggersData {
     niche_cue: NicheCueData,
     triggers: Vec<String>,
@@ -61,12 +62,43 @@ pub struct PsychotropicConfigIndex(AHashMap<String, NicheTriggersData>);
 impl PsychotropicConfig for PsychotropicConfigIndex {
     type NicheTriggersImpl = NicheTriggersData;
 
-    fn get(&self, key: &str) -> Option<&impl NicheTriggers> {
+    fn independent(&self) -> AHashSet<String> {
+        let mut candidates = AHashSet::new();
+        let mut excludes = AHashSet::new();
+        for triggers in self.0.values() {
+            let wait_for = triggers.wait_for();
+            let niche = triggers.name();
+            debug!("Is independent? {:?}: {:?}", &niche, wait_for);
+            if wait_for.is_empty() {
+                if !excludes.contains(&niche) {
+                    candidates.insert(niche);
+                }
+            } else {
+                debug!("Exclude from independent: {:?}", &niche);
+                excludes.insert(niche);
+                for dep in wait_for {
+                    if !excludes.contains(dep) {
+                        candidates.insert(dep.to_string());
+                    }
+                }
+            }
+        }
+        for exclude in excludes.iter() {
+            candidates.remove(exclude);
+        }
+        candidates
+    }
+
+    fn get(&self, key: &str) -> Option<&Self::NicheTriggersImpl> {
         self.0.get(key)
     }
 
     fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    fn values(&self) -> Vec<Self::NicheTriggersImpl> {
+        self.0.values().into_iter().map(Self::NicheTriggersImpl::clone).collect()
     }
 }
 

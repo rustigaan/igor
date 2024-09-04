@@ -200,13 +200,17 @@ impl FixtureFileSystem {
             if let DirFixtureContent {entries,..} = &current.content {
                 current_path.push(component);
                 debug!("Searching entry in {:?}", &current_path);
-                let mut entries_content = entries.write().await;
                 let part = component.as_os_str().to_os_string();
-                if let Some(entry) = entries_content.get(&part) {
+                let entry_option = {
+                    let entries_content = entries.read().await;
+                    entries_content.get(&part).map(Arc::clone)
+                };
+                if let Some(entry) = entry_option {
                     child_entry = entry.clone();
                 } else {
                     if let Some(new_dir_entry) = dir_creator(&current_path, &part)? {
                         child_entry = Arc::new(new_dir_entry);
+                        let mut entries_content = entries.write().await;
                         entries_content.insert(part, child_entry.clone());
                         debug!("Created new directory: {:?}", child_entry);
                     } else {
@@ -219,7 +223,7 @@ impl FixtureFileSystem {
             }
             current = child_entry;
         }
-        debug!("Found dir: {:?}", &current.path);
+        debug!("Found entry: {:?}", &current.path);
         Ok(current)
     }
 }
