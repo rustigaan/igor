@@ -8,19 +8,19 @@ use crate::file_system::FileSystem;
 use crate::path::AbsolutePath;
 
 pub trait NicheConfig : Sized + Debug {
+    fn from_toml(toml_data: &str) -> Result<Self>;
     fn from_yaml<R: Read>(reader: R) -> Result<Self>;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
     fn new_thunder_config<TFS: FileSystem, PFS: FileSystem>(&self, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
 }
 use super::*;
 
-pub fn from_reader<R: Read>(reader: R) -> Result<impl NicheConfig> {
-    let config: NicheConfigData = NicheConfig::from_yaml(reader)?;
-    Ok(config)
+pub fn from_yaml(body: &str) -> Result<impl NicheConfig> {
+    NicheConfigData::from_yaml(StringReader::new(&body))
 }
 
-pub fn from_string(body: String) -> Result<impl NicheConfig> {
-    NicheConfigData::from_yaml(StringReader::new(&body))
+pub fn from_toml(body: &str) -> Result<impl NicheConfig> {
+    NicheConfigData::from_toml(&body)
 }
 
 #[cfg(test)]
@@ -44,34 +44,31 @@ pub mod test {
     use indoc::indoc;
     use log::debug;
     use serde_yaml::Mapping;
-    use stringreader::StringReader;
+    use test_log::test;
     use crate::file_system::fixture;
 
     #[test]
     pub fn test_from_reader() -> Result<()> {
         // Given
-        let yaml = indoc! {r#"
-                ---
-                use-thundercloud:
-                  directory: "{{PROJECT}}/example-thundercloud"
-                  on-incoming: Update
-                  features:
-                    - glass
-                    - bash_config
-                    - kermie
-                  invar-defaults:
-                    write-mode: Ignore
-                    interpolate: false
-                    props:
-                      marthter: Jeremy
-                      buyer: Myra LeJean
-                      milk-man: Kaos
-            "#};
-        debug!("YAML: [{}]", &yaml);
-        let yaml_source = StringReader::new(yaml);
+        let toml_data = indoc! {r#"
+            [use-thundercloud]
+            directory = "{{PROJECT}}/example-thundercloud"
+            on-incoming = "Update"
+            features = ["glass", "bash_config", "kermie"]
+
+            [use-thundercloud.invar-defaults]
+            write-mode = "Ignore"
+            interpolate = false
+
+            [use-thundercloud.invar-defaults.props]
+            marthter = "Jeremy"
+            buyer = "Myra LeJean"
+            milk-man = "Kaos"
+        "#};
+        debug!("TOML: [[[\n{}\n]]]", &toml_data);
 
         // When
-        let niche_config = from_reader(yaml_source)?;
+        let niche_config = from_toml(toml_data)?;
 
         // Then
         let use_thundercloud = niche_config.use_thundercloud();
@@ -95,17 +92,16 @@ pub mod test {
     #[test]
     pub fn test_new_thunder_config() -> Result<()> {
         // Given
-        let yaml_source = StringReader::new(indoc! {r#"
-                ---
-                use-thundercloud:
-                  directory: "{{PROJECT}}/example-thundercloud"
-            "#});
-        let niche_config = from_reader(yaml_source)?;
+        let toml_source = indoc! {r#"
+            [use-thundercloud]
+            directory = "{{PROJECT}}/example-thundercloud"
+        "#};
+        let niche_config = from_toml(toml_source)?;
         let thunder_cloud_dir = AbsolutePath::try_from("/tmp")?;
         let invar_dir = AbsolutePath::try_from("/var/tmp")?;
         let project_root = AbsolutePath::try_from("/")?;
         let cumulus = AbsolutePath::new("cumulus", &thunder_cloud_dir);
-        let fs = fixture::from_yaml(StringReader::new("{}"))?;
+        let fs = fixture::from_toml("")?;
 
         // When
         let thunder_config = niche_config.new_thunder_config(fs.clone(), thunder_cloud_dir.clone(), fs.clone(), invar_dir.clone(), project_root.clone());

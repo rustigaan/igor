@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::io::Read;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use super::invar_config_data::InvarConfigData;
@@ -16,11 +15,16 @@ pub struct ThundercloudConfigData {
 impl ThundercloudConfig for ThundercloudConfigData {
     type InvarConfigImpl = InvarConfigData;
 
-    fn from_yaml<R: Read>(reader: R) -> Result<Self> {
-        let config: ThundercloudConfigData = serde_yaml::from_reader(reader)?;
+    fn from_toml(toml_data: &str) -> Result<Self> {
+        let config: ThundercloudConfigData = toml::from_str(toml_data)?;
+        Ok(config)
+    }
+
+    fn from_yaml(yaml_data: &str) -> Result<Self> {
+        let config: ThundercloudConfigData = serde_yaml::from_str(yaml_data)?;
 
         #[cfg(test)]
-        crate::test_utils::log_toml("Fixture file system", &config)?;
+        crate::test_utils::log_toml("Thundercloud Config", &config)?;
 
         Ok(config)
     }

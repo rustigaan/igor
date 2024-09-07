@@ -31,7 +31,7 @@ pub fn index_from_yaml<R: Read>(reader: R) -> Result<PsychotropicConfigIndex> {
     let data: PsychotropicConfigData = serde_yaml::from_reader(reader)?;
 
     #[cfg(test)]
-    crate::test_utils::log_toml("Fixture file system", &data)?;
+    crate::test_utils::log_toml("Psychotropic Config", &data)?;
 
     data_to_index(data)
 }
@@ -55,7 +55,6 @@ fn from_string(body: &str) -> Result<PsychotropicConfigIndex> {
 mod test {
     use indoc::indoc;
     use log::trace;
-    use stringreader::StringReader;
     use test_log::test;
     use crate::file_system::{fixture, FileSystem};
     use crate::path::test_utils::to_absolute_path;
@@ -139,19 +138,19 @@ mod test {
     }
 
     fn create_file_system_fixture() -> anyhow::Result<impl FileSystem> {
-        let yaml = indoc! {r#"
-                yeth-marthter:
-                    psychotropic.yaml: |
-                        cues:
-                        - name: "default-settings"
-                        - name: "example"
-                        - name: "non-existent"
-                          wait-for:
-                          - "example"
+        let toml_data = indoc! {r#"
+            [yeth-marthter]
+            "psychotropic.yaml" = '''
+            cues:
+            - name: "default-settings"
+            - name: "example"
+            - name: "non-existent"
+              wait-for:
+              - "example"
+            '''
         "#};
-        trace!("YAML: [{}]", &yaml);
+        trace!("TOML: [{}]", &toml_data);
 
-        let yaml_source = StringReader::new(yaml);
-        Ok(fixture::from_yaml(yaml_source)?)
+        Ok(fixture::from_toml(toml_data)?)
     }
 }

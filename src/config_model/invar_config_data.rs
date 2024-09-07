@@ -39,7 +39,7 @@ impl InvarConfig for InvarConfigData {
         let config: InvarConfigData = serde_yaml::from_reader(reader)?;
 
         #[cfg(test)]
-        crate::test_utils::log_toml("Fixture file system", &config)?;
+        crate::test_utils::log_toml("Invar Config", &config)?;
 
         Ok(config)
     }

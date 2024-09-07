@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::path::Component;
 use std::sync::Arc;
 use ahash::AHashMap;
@@ -333,13 +333,9 @@ fn convert_enum(parent_path: &AbsolutePath, file_name: &str, data: Box<FixtureEn
     }
 }
 
-pub fn from_yaml<R: Read>(reader: R) -> Result<impl FileSystem> {
-    let data : FixtureEnum = serde_yaml::from_reader(reader)?;
+pub fn from_toml(toml_data: &str) -> Result<impl FileSystem> {
+    let data : FixtureEnum = toml::from_str(toml_data)?;
     debug!("File system data: {:?}", data);
-
-    #[cfg(test)]
-    crate::test_utils::log_toml("Fixture file system", &data)?;
-
     Ok::<FixtureFileSystem, anyhow::Error>(data.into())
 }
 
@@ -348,7 +344,6 @@ mod test {
     use std::pin::pin;
     use anyhow::bail;
     use indoc::indoc;
-    use stringreader::StringReader;
     use test_log::test;
     use tokio_stream::StreamExt;
     use crate::config_model::WriteMode::WriteNew;
@@ -638,27 +633,31 @@ mod test {
     // Utilities
 
     fn create_test_fixture_file_system() -> Result<impl FileSystem> {
-        let yaml = indoc! {r#"
-                ---
-                top-dir:
-                    sub-dir:
-                        file: |
-                            First line
-                            Second line
-                            Third line
-                        empty-dir: {}
-                        empty-file: ""
-                    other-dir:
-                        file: |
-                            Something completely different:
-                            The Larch
-                    sibling-file: Foo
-                ".profile": echo "Shell!"
-            "#};
-        trace!("YAML: [{}]", &yaml);
+        let toml_data = indoc! {r#"
+            ".profile" = 'echo "Shell!"'
 
-        let yaml_source = StringReader::new(yaml);
-        Ok(from_yaml(yaml_source)?)
+            [top-dir]
+            sibling-file = "Foo"
+
+            [top-dir.sub-dir]
+            file = """
+            First line
+            Second line
+            Third line
+            """
+            empty-file = ""
+
+            [top-dir.sub-dir.empty-dir]
+
+            [top-dir.other-dir]
+            file = """
+            Something completely different:
+            The Larch
+            """
+        "#};
+        trace!("TOML: [{}]", &toml_data);
+
+        Ok(from_toml(toml_data)?)
     }
 
     async fn read_dir_sorted<FS: FileSystem>(fs: &FS, dir: &AbsolutePath) -> Result<Vec<FS::DirEntryItem>> {

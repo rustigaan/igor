@@ -14,11 +14,17 @@ pub struct NicheConfigData {
 }
 
 impl NicheConfig for NicheConfigData {
+    fn from_toml(toml_data: &str) -> Result<Self> {
+        let config: NicheConfigData = toml::from_str(toml_data)?;
+
+        Ok(config)
+    }
+
     fn from_yaml<R: Read>(reader: R) -> Result<Self> {
         let config: NicheConfigData = serde_yaml::from_reader(reader)?;
 
         #[cfg(test)]
-        crate::test_utils::log_toml("Fixture file system", &config)?;
+        crate::test_utils::log_toml("Niche Config", &config)?;
 
         Ok(config)
     }

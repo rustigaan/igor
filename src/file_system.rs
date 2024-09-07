@@ -17,6 +17,8 @@ pub mod fixture;
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum PathType { Missing, File, Directory, Other }
 
+pub enum ConfigFormat { TOML, YAML }
+
 #[derive(Debug, Clone)]
 struct ReadOnlyFileSystem<FS: FileSystem>(FS);
 

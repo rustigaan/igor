@@ -34,7 +34,6 @@ mod psychotropic_data;
 use anyhow::Result;
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::io::Read;
 
 #[cfg(test)]
 mod serde_test_utils {

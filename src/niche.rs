@@ -44,7 +44,7 @@ async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, fs: &FS) -> 
 
     let source_file = fs.open_source(config_path).await?;
     let body = source_file_to_string(source_file).await?;
-    let config = niche_config::from_string(body)?;
+    let config = niche_config::from_yaml(&body)?;
     debug!("Niche configuration: {config:?}");
     let use_thundercloud = config.use_thundercloud();
     debug!("Niche simplified: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.features());
@@ -55,7 +55,6 @@ async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, fs: &FS) -> 
 mod test {
     use indoc::indoc;
     use log::trace;
-    use stringreader::StringReader;
     use test_log::test;
     use crate::file_system::{fixture, FileSystem};
     use crate::path::test_utils::to_absolute_path;
@@ -87,38 +86,40 @@ mod test {
     }
 
     fn create_file_system_fixture() -> Result<impl FileSystem> {
-        let yaml = indoc! {r#"
-                example-thundercloud:
-                    thundercloud.yaml: |
-                        ---
-                        niche:
-                          name: example
-                          description: Example thundercloud for demonstration purposes
-                    cumulus:
-                        workshop:
-                            clock+option-glass.yaml: |
-                                ---
-                                raising:
-                                  - "steam"
-                                  - "money"
-                yeth-marthter:
-                    example:
-                        igor-thettingth.yaml: |
-                            ---
-                            use-thundercloud:
-                              directory: "{{PROJECT}}/example-thundercloud"
-                              features:
-                                - glass
-                        invar:
-                            workshop:
-                                clock+config-glass.yaml: |
-                                    write-mode: Overwrite
-                                    props:
-                                      sweeper: Lu Tse
-            "#};
-        trace!("YAML: [{}]", &yaml);
+        let toml_data = indoc! {r#"
+            [yeth-marthter.example]
+            "igor-thettingth.yaml" = '''
+            ---
+            use-thundercloud:
+              directory: "{{PROJECT}}/example-thundercloud"
+              features:
+                - glass
+            '''
 
-        let yaml_source = StringReader::new(yaml);
-        Ok(fixture::from_yaml(yaml_source)?)
+            [yeth-marthter.example.invar.workshop]
+            "clock+config-glass.yaml" = """
+            write-mode: Overwrite
+            props:
+              sweeper: Lu Tse
+            """
+
+            [example-thundercloud]
+            "thundercloud.yaml" = """
+            ---
+            niche:
+              name: example
+              description: Example thundercloud for demonstration purposes
+            """
+
+            [example-thundercloud.cumulus.workshop]
+            "clock+option-glass.yaml" = '''
+            ---
+            raising:
+              - "steam"
+              - "money"
+            '''
+        "#};
+        trace!("TOML: [{}]", &toml_data);
+        Ok(fixture::from_toml(toml_data)?)
     }
 }

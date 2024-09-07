@@ -278,7 +278,6 @@ async fn run_process_niche<FS: FileSystem>(project_root: AbsolutePath, niche: Ab
 mod test {
     use indoc::indoc;
     use log::trace;
-    use stringreader::StringReader;
     use test_log::test;
     use crate::file_system::{fixture, source_file_to_string, FileSystem};
     use crate::path::test_utils::to_absolute_path;
@@ -307,58 +306,64 @@ mod test {
     }
 
     fn create_file_system_fixture() -> Result<impl FileSystem> {
-        let yaml = indoc! {r#"
-                example-thundercloud:
-                    thundercloud.yaml: |
-                        ---
-                        niche:
-                          name: example
-                          description: Example thundercloud for demonstration purposes
-                    cumulus:
-                        workshop:
-                            clock+option-glass.yaml: |
-                                ---
-                                raising:
-                                  - "steam"
-                                  - "money"
-                yeth-marthter:
-                    psychotropic.yaml: |
-                        cues:
-                        - name: "default-settings"
-                        - name: "example"
-                        - name: "non-existent"
-                          wait-for:
-                          - "example"
-                    example:
-                        igor-thettingth.yaml: |
-                            ---
-                            use-thundercloud:
-                              directory: "{{PROJECT}}/example-thundercloud"
-                              features:
-                                - glass
-                        invar:
-                            workshop:
-                                clock+config-glass.yaml: |
-                                    write-mode: Overwrite
-                                    props:
-                                      sweeper: Lu Tse
-            "#};
-        trace!("YAML: [{}]", &yaml);
+        let toml_data = indoc! {r#"
+            [yeth-marthter]
+            "psychotropic.yaml" = '''
+            cues:
+            - name: "default-settings"
+            - name: "example"
+            - name: "non-existent"
+              wait-for:
+              - "example"
+            '''
 
-        let yaml_source = StringReader::new(yaml);
-        Ok(fixture::from_yaml(yaml_source)?)
+            [yeth-marthter.example]
+            "igor-thettingth.yaml" = '''
+            ---
+            use-thundercloud:
+              directory: "{{PROJECT}}/example-thundercloud"
+              features:
+                - glass
+            '''
+
+            [yeth-marthter.example.invar.workshop]
+            "clock+config-glass.yaml" = """
+            write-mode: Overwrite
+            props:
+              sweeper: Lu Tse
+            """
+
+            [example-thundercloud]
+            "thundercloud.yaml" = """
+            ---
+            niche:
+              name: example
+              description: Example thundercloud for demonstration purposes
+            """
+
+            [example-thundercloud.cumulus.workshop]
+            "clock+option-glass.yaml" = '''
+            ---
+            raising:
+              - "steam"
+              - "money"
+            '''
+        "#};
+        trace!("TOML: [{}]", &toml_data);
+        Ok(fixture::from_toml(toml_data)?)
     }
 }
 
 #[cfg(test)]
 mod test_utils {
     use anyhow::Result;
-    use log::debug;
+    use log::{debug, warn};
     use serde::Serialize;
 
     pub fn log_toml<T: Serialize>(label: &str,item: &T) -> Result<()> {
         let toml_string = toml::to_string(item)?;
-        debug!("Toml: {:?}: [[[\n{}\n]]]", label, toml_string);
+        warn!("YAML is deprecated, use TOML (the debug logging shows the equivalent TOML data)");
+        debug!("TOML: {:?}: [[[\n{}\n]]]", label, toml_string);
         Ok(())
     }
 }

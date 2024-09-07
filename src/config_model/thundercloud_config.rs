@@ -1,20 +1,19 @@
-use stringreader::StringReader;
 use super::*;
 
 use crate::config_model::thundercloud_config_data::ThundercloudConfigData;
+use crate::file_system::ConfigFormat;
 
-pub fn from_reader<R: Read>(reader: R) -> Result<impl ThundercloudConfig> {
-    let config: ThundercloudConfigData = ThundercloudConfig::from_yaml(reader)?;
-    Ok(config)
-}
-
-pub fn from_string(body: String) -> Result<impl ThundercloudConfig> {
-    ThundercloudConfigData::from_yaml(StringReader::new(&body))
+pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl ThundercloudConfig> {
+    match config_format {
+        ConfigFormat::TOML => ThundercloudConfigData::from_toml(body),
+        ConfigFormat::YAML => ThundercloudConfigData::from_yaml(body)
+    }
 }
 
 pub trait ThundercloudConfig : Debug + Sized {
     type InvarConfigImpl : InvarConfig;
-    fn from_yaml<R: Read>(reader: R) -> Result<Self>;
+    fn from_toml(toml_data: &str) -> Result<Self>;
+    fn from_yaml(yaml_data: &str) -> Result<Self>;
     fn niche(&self) -> &impl NicheDescription;
     fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
 }
@@ -26,7 +25,6 @@ mod test {
     use indoc::indoc;
     use log::debug;
     use serde_yaml::Mapping;
-    use stringreader::StringReader;
     use crate::config_model::serde_test_utils::insert_entry;
     use crate::config_model::WriteMode::Overwrite;
 
@@ -46,10 +44,9 @@ mod test {
                     alter-ego: Lobsang
             "#};
         debug!("YAML: [{}]", &yaml);
-        let yaml_source = StringReader::new(yaml);
 
         // When
-        let thundercloud_config = from_reader(yaml_source)?;
+        let thundercloud_config = from_str(yaml, ConfigFormat::YAML)?;
 
         // Then
         assert_eq!(thundercloud_config.niche().name(), "example");
@@ -75,10 +72,9 @@ mod test {
                   name: example
             "#};
         debug!("YAML: [{}]", &yaml);
-        let yaml_source = StringReader::new(yaml);
 
         // When
-        let thundercloud_config = from_reader(yaml_source)?;
+        let thundercloud_config = from_str(yaml, ConfigFormat::YAML)?;
 
         // Then
         assert_eq!(thundercloud_config.niche().name(), "example");

@@ -14,7 +14,7 @@ use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercl
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
-use crate::file_system::{source_file_to_string, DirEntry, FileSystem, SourceFile, TargetFile};
+use crate::file_system::{source_file_to_string, ConfigFormat, DirEntry, FileSystem, PathType, SourceFile, TargetFile};
 use crate::thundercloud::DirectoryContext::{Project, ThunderCloud};
 
 pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
@@ -43,19 +43,20 @@ async fn process_niche_in_context<T: ThunderConfig>(generation_context: &Generat
 }
 
 async fn get_config<FS: FileSystem>(thundercloud_directory: &AbsolutePath, fs: FS) -> Result<impl ThundercloudConfig> {
-    let mut config_path = thundercloud_directory.clone();
-    config_path.push("thundercloud.yaml");
-    info!("Config path: {config_path:?}");
-
-    let source_file = fs.open_source(config_path).await?;
+    let source_file;
+    let config_format;
+    let config_toml = AbsolutePath::new("thundercloud.toml", &thundercloud_directory);
+    if fs.path_type(&config_toml).await == PathType::File {
+        source_file = fs.open_source(config_toml).await?;
+        config_format = ConfigFormat::TOML;
+    } else {
+        let config_yaml = AbsolutePath::new("thundercloud.yaml", &thundercloud_directory);
+        source_file = fs.open_source(config_yaml).await?;
+        config_format = ConfigFormat::YAML;
+    }
     let body = source_file_to_string(source_file).await?;
-    let config = get_config_from_string(body)?;
-    debug!("Thundercloud configuration: {config:?}");
-    Ok(config)
-}
+    let config = thundercloud_config::from_str(&body, config_format)?;
 
-fn get_config_from_string(body: String) -> Result<impl ThundercloudConfig> {
-    let config = thundercloud_config::from_string(body)?;
     debug!("Thundercloud configuration: {config:?}");
     Ok(config)
 }
@@ -759,7 +760,6 @@ where
 #[cfg(test)]
 mod test {
     use indoc::indoc;
-    use stringreader::StringReader;
     use test_log::test;
     use crate::config_model::niche_config;
     use crate::config_model::niche_config::NicheConfig;
@@ -835,98 +835,104 @@ mod test {
     }
 
     fn create_thundercloud_file_system_fixture() -> Result<impl FileSystem> {
-        let yaml = indoc! {r#"
-                example-thundercloud:
-                    thundercloud.yaml: |
-                        ---
-                        niche:
-                          name: example
-                          description: Example thundercloud for demonstration purposes
-                        invar-defaults:
-                          write-mode: Overwrite
-                          interpolate: true
-                          props:
-                            milk-man: Ronny Soak
-                            alter-ego: Lobsang
-                    cumulus:
-                        workshop:
-                            clock+config-glass.yaml: |
-                                write-mode: WriteNew
-                            clock+fragment-glass-spring.yaml: |
-                                ---
-                                spring:
-                                  material: glass
-                                  delicate: false
-                                  number-of-coils: 3
-                            clock+option-glass.yaml: |
-                                ---
-                                sweeper: "${sweeper}"
-                                raising:
-                                  - "steam"
-                                  - "money"
-                                # ==== BEGIN FRAGMENT glass-spring ====
-                                  - "replaced-by-fragment"
-                                # ==== END FRAGMENT glass-spring ====
-                                  - "to the occasion"
-            "#};
-        trace!("YAML: [{}]", &yaml);
+        let toml_data = indoc! {r#"
+            [example-thundercloud]
+            "thundercloud.yaml" = """
+            ---
+            niche:
+              name: example
+              description: Example thundercloud for demonstration purposes
+            invar-defaults:
+              write-mode: Overwrite
+              interpolate: true
+              props:
+                milk-man: Ronny Soak
+                alter-ego: Lobsang
+            """
 
-        let yaml_source = StringReader::new(yaml);
-        Ok(fixture::from_yaml(yaml_source)?)
+            [example-thundercloud.cumulus.workshop]
+            "clock+fragment-glass-spring.yaml" = """
+            ---
+            spring:
+              material: glass
+              delicate: false
+              number-of-coils: 3
+            """
+            "clock+option-glass.yaml" = '''
+            ---
+            sweeper: "${sweeper}"
+            raising:
+              - "steam"
+              - "money"
+            # ==== BEGIN FRAGMENT glass-spring ====
+              - "replaced-by-fragment"
+            # ==== END FRAGMENT glass-spring ====
+              - "to the occasion"
+            '''
+            "clock+config-glass.yaml" = """
+            write-mode: WriteNew
+            """
+        "#};
+        trace!("TOML: [[[\n{}\n]]]", &toml_data);
+
+        Ok(fixture::from_toml(toml_data)?)
     }
 
     fn create_project_file_system_fixture() -> Result<impl FileSystem> {
-        let yaml = indoc! {r#"
-                yeth-marthter:
-                    example:
-                        igor-thettingth.yaml: |
-                            ---
-                            use-thundercloud:
-                              directory: "{{PROJECT}}/example-thundercloud"
-                              on-incoming: Update
-                              features:
-                                - glass
-                                - bash_config
-                                - kermie
-                              invar-defaults:
-                                props:
-                                  marthter: Jeremy
-                                  buyer: Myra LeJean
-                                  milk-man: Kaos
-                        invar:
-                            workshop:
-                                bench:
-                                    press+option-free: |
-                                        #!/usr/bin/false
+        let toml_data = indoc! {r#"
+            [yeth-marthter.example]
+            "igor-thettingth.yaml" = '''
+            ---
+            use-thundercloud:
+              directory: "{{PROJECT}}/example-thundercloud"
+              on-incoming: Update
+              features:
+                - glass
+                - bash_config
+                - kermie
+              invar-defaults:
+                props:
+                  marthter: Jeremy
+                  buyer: Myra LeJean
+                  milk-man: Kaos
+            '''
 
-                                        echo 'Hello, world!'
-                                clock+config-glass.yaml: |
-                                    write-mode: Overwrite
-                                    props:
-                                      sweeper: Lu Tse
-                                clock+fragment-glass-spring.yaml: |
-                                    # ==== BEGIN FRAGMENT glass-spring ====
-                                    ---
-                                    spring:
-                                      material: glass
-                                      delicate: true
-                                      number-of-coils: 17
-                                    raising:
-                                      - "expectations"
-                                    # ==== END FRAGMENT glass-spring ====
-                                README+fragment-@-details.md: |
-                                    ## Details
+            [yeth-marthter.example.invar.workshop]
+            "README+fragment-@-details.md" = """
+            ## Details
 
-                                    The details of this project.
+            The details of this project.
 
-                                    * Marthter: ${marthter}
-                                    * Buyer: ${buyer}
-                                    * Milk man: ${milk-man}
-                                    * Undefined: ${undefined}
-            "#};
-        trace!("YAML: [{}]", &yaml);
+            * Marthter: ${marthter}
+            * Buyer: ${buyer}
+            * Milk man: ${milk-man}
+            * Undefined: ${undefined}
+            """
+            "clock+config-glass.yaml" = """
+            write-mode: Overwrite
+            props:
+              sweeper: Lu Tse
+            """
+            "clock+fragment-glass-spring.yaml" = '''
+            # ==== BEGIN FRAGMENT glass-spring ====
+            ---
+            spring:
+              material: glass
+              delicate: true
+              number-of-coils: 17
+            raising:
+              - "expectations"
+            # ==== END FRAGMENT glass-spring ====
+            '''
 
-        let yaml_source = StringReader::new(yaml);
-        Ok(fixture::from_yaml(yaml_source)?)
+            [yeth-marthter.example.invar.workshop.bench]
+            "press+option-free" = """
+            #!/usr/bin/false
+
+            echo 'Hello, world!'
+            """
+        "#};
+        trace!("TOML: [[[\n{}\n]]]", &toml_data);
+        Ok(fixture::from_toml(toml_data)?)
     }
 }
