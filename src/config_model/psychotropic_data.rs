@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Result};
 use ahash::{AHashMap, AHashSet};
 use log::debug;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use super::psychotropic::{NicheTriggers, PsychotropicConfig};
 
-#[derive(Deserialize,Debug,Clone)]
+#[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct NicheCueData {
     name: String,
@@ -22,7 +22,7 @@ impl NicheCueData {
     }
 }
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize,Serialize,Debug)]
 pub struct PsychotropicConfigData {
     cues: Vec<NicheCueData>
 }

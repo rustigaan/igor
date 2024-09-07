@@ -12,10 +12,7 @@ mod real;
 pub use real::real_file_system;
 
 #[cfg(test)]
-mod fixture;
-
-#[cfg(test)]
-pub use fixture::fixture_file_system;
+pub mod fixture;
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum PathType { Missing, File, Directory, Other }

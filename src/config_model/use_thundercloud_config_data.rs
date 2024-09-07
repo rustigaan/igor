@@ -3,9 +3,9 @@ use super::git_remote_config_data::GitRemoteConfigData;
 use super::invar_config_data::InvarConfigData;
 use std::borrow::Cow;
 use once_cell::sync::Lazy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize,Debug,Clone)]
+#[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct UseThundercloudConfigData {
     directory: Option<String>,

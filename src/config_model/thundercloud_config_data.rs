@@ -1,12 +1,12 @@
 use std::borrow::Cow;
 use std::io::Read;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use super::invar_config_data::InvarConfigData;
 use crate::config_model::{NicheDescription, ThundercloudConfig};
 use crate::config_model::niche_description::NicheDescriptionData;
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize,Serialize,Debug)]
 #[serde(rename_all = "kebab-case")]
 pub struct ThundercloudConfigData {
     niche: NicheDescriptionData,
@@ -16,8 +16,12 @@ pub struct ThundercloudConfigData {
 impl ThundercloudConfig for ThundercloudConfigData {
     type InvarConfigImpl = InvarConfigData;
 
-    fn from_reader<R: Read>(reader: R) -> Result<Self> {
+    fn from_yaml<R: Read>(reader: R) -> Result<Self> {
         let config: ThundercloudConfigData = serde_yaml::from_reader(reader)?;
+
+        #[cfg(test)]
+        crate::test_utils::log_toml("Fixture file system", &config)?;
+
         Ok(config)
     }
 

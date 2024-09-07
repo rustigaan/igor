@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use crate::config_model::{GitRemoteConfig, InvarConfig};
 
-#[derive(Deserialize,Debug,Clone,Eq, PartialEq)]
+#[derive(Deserialize,Serialize,Debug,Clone,Eq, PartialEq)]
 pub enum OnIncoming {
     Update,
     Ignore,

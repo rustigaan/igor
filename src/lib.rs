@@ -280,7 +280,7 @@ mod test {
     use log::trace;
     use stringreader::StringReader;
     use test_log::test;
-    use crate::file_system::{fixture_file_system, source_file_to_string, FileSystem};
+    use crate::file_system::{fixture, source_file_to_string, FileSystem};
     use crate::path::test_utils::to_absolute_path;
     use super::*;
 
@@ -346,6 +346,19 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         let yaml_source = StringReader::new(yaml);
-        Ok(fixture_file_system(yaml_source)?)
+        Ok(fixture::from_yaml(yaml_source)?)
+    }
+}
+
+#[cfg(test)]
+mod test_utils {
+    use anyhow::Result;
+    use log::debug;
+    use serde::Serialize;
+
+    pub fn log_toml<T: Serialize>(label: &str,item: &T) -> Result<()> {
+        let toml_string = toml::to_string(item)?;
+        debug!("Toml: {:?}: [[[\n{}\n]]]", label, toml_string);
+        Ok(())
     }
 }

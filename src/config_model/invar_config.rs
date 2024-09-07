@@ -5,11 +5,11 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::io::Read;
 use ahash::AHashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_yaml::Mapping;
 use stringreader::StringReader;
 
-#[derive(Deserialize,Debug,Clone,Copy,Eq, PartialEq)]
+#[derive(Deserialize,Serialize,Debug,Clone,Copy,Eq, PartialEq)]
 pub enum WriteMode {
     Overwrite,
     WriteNew,
@@ -17,7 +17,7 @@ pub enum WriteMode {
 }
 
 pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
-    fn from_reader<R: Read>(reader: R) -> anyhow::Result<Self>;
+    fn from_yaml<R: Read>(reader: R) -> Result<Self>;
     fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self>;
     fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self>;
     fn with_write_mode(&self, write_mode: WriteMode) -> Cow<Self>;
@@ -36,12 +36,12 @@ pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
 
 /// Reads invar configuration from a YAML file.
 pub fn from_reader<R: Read>(reader: R) -> Result<impl InvarConfig> {
-    let config: InvarConfigData = InvarConfigData::from_reader(reader)?;
+    let config: InvarConfigData = InvarConfigData::from_yaml(reader)?;
     Ok(config.with_props_option(None).into_owned())
 }
 
 pub fn from_string(body: String) -> Result<impl InvarConfig> {
-    let invar_config = InvarConfigData::from_reader(StringReader::new(&body))?;
+    let invar_config = InvarConfigData::from_yaml(StringReader::new(&body))?;
     Ok(invar_config)
 }
 

@@ -8,19 +8,19 @@ use crate::file_system::FileSystem;
 use crate::path::AbsolutePath;
 
 pub trait NicheConfig : Sized + Debug {
-    fn from_reader<R: Read>(reader: R) -> anyhow::Result<Self>;
+    fn from_yaml<R: Read>(reader: R) -> Result<Self>;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
     fn new_thunder_config<TFS: FileSystem, PFS: FileSystem>(&self, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
 }
 use super::*;
 
 pub fn from_reader<R: Read>(reader: R) -> Result<impl NicheConfig> {
-    let config: NicheConfigData = NicheConfig::from_reader(reader)?;
+    let config: NicheConfigData = NicheConfig::from_yaml(reader)?;
     Ok(config)
 }
 
 pub fn from_string(body: String) -> Result<impl NicheConfig> {
-    NicheConfigData::from_reader(StringReader::new(&body))
+    NicheConfigData::from_yaml(StringReader::new(&body))
 }
 
 #[cfg(test)]
@@ -29,8 +29,8 @@ pub mod test_utils {
     use stringreader::StringReader;
     use crate::config_model::NicheConfig;
 
-    pub fn from_string<S: Into<String>>(body: S) -> anyhow::Result<impl NicheConfig> {
-        let config: NicheConfigData = NicheConfig::from_reader(StringReader::new(&body.into()))?;
+    pub fn from_string<S: Into<String>>(body: S) -> Result<impl NicheConfig> {
+        let config: NicheConfigData = NicheConfig::from_yaml(StringReader::new(&body.into()))?;
         Ok(config)
     }
 }
@@ -45,7 +45,7 @@ pub mod test {
     use log::debug;
     use serde_yaml::Mapping;
     use stringreader::StringReader;
-    use crate::file_system::fixture_file_system;
+    use crate::file_system::fixture;
 
     #[test]
     pub fn test_from_reader() -> Result<()> {
@@ -105,7 +105,7 @@ pub mod test {
         let invar_dir = AbsolutePath::try_from("/var/tmp")?;
         let project_root = AbsolutePath::try_from("/")?;
         let cumulus = AbsolutePath::new("cumulus", &thunder_cloud_dir);
-        let fs = fixture_file_system(StringReader::new("{}"))?;
+        let fs = fixture::from_yaml(StringReader::new("{}"))?;
 
         // When
         let thunder_config = niche_config.new_thunder_config(fs.clone(), thunder_cloud_dir.clone(), fs.clone(), invar_dir.clone(), project_root.clone());

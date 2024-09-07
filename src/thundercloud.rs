@@ -763,7 +763,7 @@ mod test {
     use test_log::test;
     use crate::config_model::niche_config;
     use crate::config_model::niche_config::NicheConfig;
-    use crate::file_system::fixture_file_system;
+    use crate::file_system::fixture;
     use crate::path::test_utils::to_absolute_path;
     use super::*;
 
@@ -872,7 +872,7 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         let yaml_source = StringReader::new(yaml);
-        Ok(fixture_file_system(yaml_source)?)
+        Ok(fixture::from_yaml(yaml_source)?)
     }
 
     fn create_project_file_system_fixture() -> Result<impl FileSystem> {
@@ -927,6 +927,6 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         let yaml_source = StringReader::new(yaml);
-        Ok(fixture_file_system(yaml_source)?)
+        Ok(fixture::from_yaml(yaml_source)?)
     }
 }

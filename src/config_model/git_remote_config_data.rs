@@ -1,7 +1,7 @@
 use super::GitRemoteConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize,Debug,Clone)]
+#[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct GitRemoteConfigData {
     fetch_url: String,

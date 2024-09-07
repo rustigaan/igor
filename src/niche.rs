@@ -57,7 +57,7 @@ mod test {
     use log::trace;
     use stringreader::StringReader;
     use test_log::test;
-    use crate::file_system::{fixture_file_system, FileSystem};
+    use crate::file_system::{fixture, FileSystem};
     use crate::path::test_utils::to_absolute_path;
     use super::*;
 
@@ -119,6 +119,6 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         let yaml_source = StringReader::new(yaml);
-        Ok(fixture_file_system(yaml_source)?)
+        Ok(fixture::from_yaml(yaml_source)?)
     }
 }

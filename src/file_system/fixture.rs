@@ -6,8 +6,9 @@ use ahash::AHashMap;
 use anyhow::anyhow;
 use async_stream::stream;
 use log::{debug, trace, warn};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{MapAccess, Visitor};
+use serde::ser::SerializeMap;
 use stringreader::StringReader;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver,channel};
@@ -251,14 +252,14 @@ fn create_new_directory(current_path: &PathBuf, part: &OsString) -> Result<Optio
     Ok(Some(new_dir_entry))
 }
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize,Serialize,Debug)]
 #[serde(untagged)]
 enum FixtureEnum {
     Dir(FixtureDirectory),
     File(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug)] // Serialize and Deserialize implemented below
 struct FixtureDirectory(AHashMap<String,Box<FixtureEnum>>);
 
 struct FixtureDirectoryVisitor;
@@ -332,9 +333,13 @@ fn convert_enum(parent_path: &AbsolutePath, file_name: &str, data: Box<FixtureEn
     }
 }
 
-pub fn fixture_file_system<R: Read>(reader: R) -> Result<impl FileSystem> {
+pub fn from_yaml<R: Read>(reader: R) -> Result<impl FileSystem> {
     let data : FixtureEnum = serde_yaml::from_reader(reader)?;
     debug!("File system data: {:?}", data);
+
+    #[cfg(test)]
+    crate::test_utils::log_toml("Fixture file system", &data)?;
+
     Ok::<FixtureFileSystem, anyhow::Error>(data.into())
 }
 
@@ -653,7 +658,7 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         let yaml_source = StringReader::new(yaml);
-        Ok(fixture_file_system(yaml_source)?)
+        Ok(from_yaml(yaml_source)?)
     }
 
     async fn read_dir_sorted<FS: FileSystem>(fs: &FS, dir: &AbsolutePath) -> Result<Vec<FS::DirEntryItem>> {
@@ -664,5 +669,18 @@ mod test {
         }
         entries.sort_by_key(|entry| entry.file_name());
         Ok(entries)
+    }
+}
+
+impl Serialize for FixtureDirectory {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (k, v) in &self.0 {
+            map.serialize_entry(k, v)?;
+        }
+        map.end()
     }
 }

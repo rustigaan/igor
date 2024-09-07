@@ -23,12 +23,16 @@ pub trait PsychotropicConfig: Debug + Sized {
     fn values(&self) -> Vec<Self::NicheTriggersImpl>;
 }
 
-pub fn from_reader<R: Read>(reader: R) -> Result<impl PsychotropicConfig> {
-    index_from_reader(reader)
+pub fn from_yaml<R: Read>(reader: R) -> Result<impl PsychotropicConfig> {
+    index_from_yaml(reader)
 }
 
-pub fn index_from_reader<R: Read>(reader: R) -> Result<PsychotropicConfigIndex> {
+pub fn index_from_yaml<R: Read>(reader: R) -> Result<PsychotropicConfigIndex> {
     let data: PsychotropicConfigData = serde_yaml::from_reader(reader)?;
+
+    #[cfg(test)]
+    crate::test_utils::log_toml("Fixture file system", &data)?;
+
     data_to_index(data)
 }
 
@@ -44,7 +48,7 @@ pub async fn from_path<FS: FileSystem>(source_path: &AbsolutePath, file_system: 
 }
 
 fn from_string(body: &str) -> Result<PsychotropicConfigIndex> {
-    index_from_reader(StringReader::new(body))
+    index_from_yaml(StringReader::new(body))
 }
 
 #[cfg(test)]
@@ -53,7 +57,7 @@ mod test {
     use log::trace;
     use stringreader::StringReader;
     use test_log::test;
-    use crate::file_system::{fixture_file_system, FileSystem};
+    use crate::file_system::{fixture, FileSystem};
     use crate::path::test_utils::to_absolute_path;
     use super::*;
 
@@ -148,6 +152,6 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         let yaml_source = StringReader::new(yaml);
-        Ok(fixture_file_system(yaml_source)?)
+        Ok(fixture::from_yaml(yaml_source)?)
     }
 }

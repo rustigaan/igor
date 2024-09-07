@@ -2,11 +2,12 @@ use crate::config_model::invar_config::*;
 use std::borrow::Cow;
 use std::io::Read;
 use ahash::AHashMap;
+use anyhow::Result;
 use log::debug;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-#[derive(Deserialize,Debug,Clone)]
+#[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct InvarConfigData {
     write_mode: Option<WriteMode>,
@@ -34,8 +35,12 @@ mod test_invar_config_data {
 }
 
 impl InvarConfig for InvarConfigData {
-    fn from_reader<R: Read>(reader: R) -> anyhow::Result<Self> {
+    fn from_yaml<R: Read>(reader: R) -> Result<Self> {
         let config: InvarConfigData = serde_yaml::from_reader(reader)?;
+
+        #[cfg(test)]
+        crate::test_utils::log_toml("Fixture file system", &config)?;
+
         Ok(config)
     }
 

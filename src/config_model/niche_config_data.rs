@@ -1,20 +1,25 @@
 use std::io::Read;
-use serde::Deserialize;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use crate::file_system::FileSystem;
 use super::{ThunderConfig, UseThundercloudConfig, NicheConfig};
 use super::thunder_config_data::ThunderConfigData;
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
 use crate::path::AbsolutePath;
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize,Serialize,Debug)]
 #[serde(rename_all = "kebab-case")]
 pub struct NicheConfigData {
     use_thundercloud: UseThundercloudConfigData,
 }
 
 impl NicheConfig for NicheConfigData {
-    fn from_reader<R: Read>(reader: R) -> anyhow::Result<Self> {
+    fn from_yaml<R: Read>(reader: R) -> Result<Self> {
         let config: NicheConfigData = serde_yaml::from_reader(reader)?;
+
+        #[cfg(test)]
+        crate::test_utils::log_toml("Fixture file system", &config)?;
+
         Ok(config)
     }
 
