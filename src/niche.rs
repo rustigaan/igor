@@ -39,12 +39,12 @@ pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niche_dir
 }
 
 async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, fs: &FS) -> Result<impl NicheConfig> {
-    let config_path = AbsolutePath::new("igor-thettingth.yaml", niche_directory);
+    let config_path = AbsolutePath::new("igor-thettingth.toml", niche_directory);
     info!("Config path: {config_path:?}");
 
     let source_file = fs.open_source(config_path).await?;
     let body = source_file_to_string(source_file).await?;
-    let config = niche_config::from_str(&body, ConfigFormat::YAML)?;
+    let config = niche_config::from_str(&body, ConfigFormat::TOML)?;
     debug!("Niche configuration: {config:?}");
     let use_thundercloud = config.use_thundercloud();
     debug!("Niche simplified: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.features());
@@ -88,12 +88,10 @@ mod test {
     fn create_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
             [yeth-marthter.example]
-            "igor-thettingth.yaml" = '''
-            ---
-            use-thundercloud:
-              directory: "{{PROJECT}}/example-thundercloud"
-              features:
-                - glass
+            "igor-thettingth.toml" = '''
+            [use-thundercloud]
+            directory = "{{PROJECT}}/example-thundercloud"
+            features = ["glass"]
             '''
 
             [yeth-marthter.example.invar.workshop]

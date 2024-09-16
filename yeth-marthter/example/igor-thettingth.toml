@@ -1,0 +1,9 @@
+[use-thundercloud]
+directory = "{{PROJECT}}/example-thundercloud"
+on-incoming = "Update"
+features = ["glass", "bash_config", "kermie"]
+
+[use-thundercloud.invar-defaults.props]
+marthter = "Jeremy"
+buyer = "Myra LeJean"
+milk-man = "Kaos"

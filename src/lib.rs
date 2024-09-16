@@ -231,7 +231,7 @@ where
     while let Some(entry_result) = entries.next().await {
         let entry = entry_result?;
         let niche_dir = AbsolutePath::new(entry.file_name(), &niches_directory);
-        let settings_file = AbsolutePath::new("igor-thettingth.yaml", &niche_dir);
+        let settings_file = AbsolutePath::new("igor-thettingth.toml", &niche_dir);
         debug!("Looking for file: {:?}", &settings_file);
         if fs.path_type(&settings_file).await == PathType::File {
             let niche_name = niche_name(&niche_dir);
@@ -261,7 +261,7 @@ fn niche_path<S: Into<String>>(name: S, niches_directory: &AbsolutePath) -> Abso
 
 async fn run_process_niche<FS: FileSystem>(project_root: AbsolutePath, niche: AbsolutePath, niche_fs: FS, tx_done: Sender<AbsolutePath>) -> Result<()> {
     debug!("Processing niche: {:?}", &niche);
-    let config_path = niche_path("igor-thettingth.yaml", &niche);
+    let config_path = niche_path("igor-thettingth.toml", &niche);
     let result = if niche_fs.path_type(&config_path).await == PathType::File {
         process_niche(project_root, niche.clone(), niche_fs).await
     } else {
@@ -321,12 +321,10 @@ mod test {
             '''
 
             [yeth-marthter.example]
-            "igor-thettingth.yaml" = '''
-            ---
-            use-thundercloud:
-              directory: "{{PROJECT}}/example-thundercloud"
-              features:
-                - glass
+            "igor-thettingth.toml" = '''
+            [use-thundercloud]
+            directory = "{{PROJECT}}/example-thundercloud"
+            features = ["glass"]
             '''
 
             [yeth-marthter.example.invar.workshop]

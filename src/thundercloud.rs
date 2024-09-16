@@ -811,9 +811,9 @@ mod test {
     }
 
     async fn create_niche_config<FS: FileSystem>(fs: FS) -> Result<impl NicheConfig> {
-        let source_file = fs.open_source(to_absolute_path("/yeth-marthter/example/igor-thettingth.yaml")).await?;
+        let source_file = fs.open_source(to_absolute_path("/yeth-marthter/example/igor-thettingth.toml")).await?;
         let body = body(source_file).await?;
-        Ok(niche_config::from_str(&body, ConfigFormat::YAML)?)
+        Ok(niche_config::from_str(&body, ConfigFormat::TOML)?)
     }
 
     async fn create_thunder_config<'a, NC: NicheConfig, TFS: FileSystem + 'a, PFS: FileSystem + 'a>(niche_configuration: &'a NC, thundercloud_fs: TFS, project_fs: PFS) -> Result<impl ThunderConfig + 'a> {
@@ -881,20 +881,16 @@ mod test {
     fn create_project_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
             [yeth-marthter.example]
-            "igor-thettingth.yaml" = '''
-            ---
-            use-thundercloud:
-              directory: "{{PROJECT}}/example-thundercloud"
-              on-incoming: Update
-              features:
-                - glass
-                - bash_config
-                - kermie
-              invar-defaults:
-                props:
-                  marthter: Jeremy
-                  buyer: Myra LeJean
-                  milk-man: Kaos
+            "igor-thettingth.toml" = '''
+            [use-thundercloud]
+            directory = "{{PROJECT}}/example-thundercloud"
+            on-incoming = "Update"
+            features = ["glass", "bash_config", "kermie"]
+
+            [use-thundercloud.invar-defaults.props]
+            marthter = "Jeremy"
+            buyer = "Myra LeJean"
+            milk-man = "Kaos"
             '''
 
             [yeth-marthter.example.invar.workshop]
