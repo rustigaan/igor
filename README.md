@@ -19,11 +19,9 @@ It is also possible to have Igor apply selected thundercloud projects to a marth
 Filenames in both the thundercloud projects and in the `yeth-marthter/nicheName` directories of marthterth' projects are qualified with an infix before the last dot to denote their function.
 
 * Option: `basename+option-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file
-* Example: `basename+example-featureName.ext` generates a file `basename.ext` only if the feature is turned on in the settings file and the file does not exist
-* Overwrite: `basename+overwrite-featureName.ext` signifies that `basename+example-featureName.ext` behaves like an option
 * Unnamed fragment: `basename+fragment-featureName.ext` replaces placeholders with the ID `featureName` in `basename.ext` only if the feature is turned on in the settings file
 * Named fragment: `basename+fragment-featureName-placeholderName.ext` replaces placeholders with the ID `featureName-placeholderName` in `basename.ext` only if the feature is turned on in the settings file
-* Ignore: `basename+ignore-featureName.ext` ignores the instructions for file `basename.ext` in this niche only if the feature is turned on in the settings file (Ignore files are mainly useful in invar)
+* Configuration: `basename+config-feature.ext.toml` or `basename+config-feature.toml` specifies configuration settings for `basename.ext` c.q. `basename` (See below)
 
 If the basename starts with `dot_`, then this prefix is replaced with a dot (`.`). If the basename starts with `x_`, then this prefix is removed. See the examples below.
 
