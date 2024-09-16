@@ -328,18 +328,18 @@ mod test {
             '''
 
             [yeth-marthter.example.invar.workshop]
-            "clock+config-glass.yaml" = """
-            write-mode: Overwrite
-            props:
-              sweeper: Lu Tse
+            "clock+config-glass.yaml.toml" = """
+            write-mode = "Overwrite"
+
+            [props]
+            sweeper = "Lu Tse"
             """
 
             [example-thundercloud]
-            "thundercloud.yaml" = """
-            ---
-            niche:
-              name: example
-              description: Example thundercloud for demonstration purposes
+            "thundercloud.toml" = """
+            [niche]
+            name = "example"
+            description = "Example thundercloud for demonstration purposes"
             """
 
             [example-thundercloud.cumulus.workshop]

@@ -85,7 +85,9 @@ enum BoltKind {
     Fragment {
         qualifier: Option<String>
     },
-    Config,
+    Config {
+        format: ConfigFormat
+    },
     Unknown {
         qualifier: Option<String>
     },
@@ -95,7 +97,7 @@ impl Bolt {
     fn kind_name(&self) -> &'static str {
         match self.kind {
             BoltKind::Option => "option",
-            BoltKind::Config => "config",
+            BoltKind::Config { .. } => "config",
             BoltKind::Fragment { .. } => "fragment",
             BoltKind::Unknown { .. } => "unknown",
         }
@@ -126,6 +128,9 @@ impl Bolt {
     }
 }
 
+static CONFIG_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new("^(?<base>.*)[+]config(-(?<feature>[a-z0-9_]+|@))?(?<extension>[.][^.]*)?[.](?<format>toml|yaml)$").unwrap()
+});
 static BOLT_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
     Regex::new("^(?<base>.*)[+](?<bolt_type>[a-z0-9_]+)(-(?<feature>[a-z0-9_]+|@)(-(?<qualifier>[a-z0-9_]+))?)?(?<extension>[.][^.]*)$").unwrap()
 });
@@ -411,7 +416,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         let mut use_config = Cow::Borrowed(invar_config);
         for bolt in bolts {
             debug!("Bolt kind: {:?}", bolt.kind_name());
-            if let BoltKind::Config = bolt.kind {
+            if let BoltKind::Config { format } = bolt.kind {
                 let thundercloud_fs = self.0.thundercloud_file_system();
                 let project_fs = self.0.project_file_system();
                 debug!("Bolt context: {:?}", bolt.context());
@@ -419,7 +424,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                     ThunderCloud => get_invar_config_body(bolt.source(), &thundercloud_fs).await?,
                     Project => get_invar_config_body(bolt.source(), &project_fs).await?,
                 };
-                let bolt_invar_config = get_invar_config(&bolt_invar_config_body, ConfigFormat::YAML)?;
+                let bolt_invar_config = get_invar_config(&bolt_invar_config_body, format)?;
                 debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
                 let new_use_config = use_config.to_owned().with_invar_config(bolt_invar_config).into_owned();
                 use_config = Cow::Owned(new_use_config);
@@ -527,6 +532,8 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 } else if let Some(captures) = BOLT_REGEX_WITHOUT_DOT.captures(&file_name) {
                     debug!("Bolt regex without dot: {:?}", &file_name);
                     bolt = captures_to_bolt(captures, source)?;
+                } else if let Some(captures) = CONFIG_REGEX.captures(&file_name) {
+                    bolt = config_captures_to_bolt(captures, source)?;
                 } else if let Some(captures) = PLAIN_FILE_REGEX_WITH_DOT.captures(&file_name) {
                     debug!("Plain file regex with dot: {:?}", &file_name);
                     let (base_name, extension) =
@@ -702,17 +709,11 @@ fn captures_to_bolt(captures: Captures, source: FileLocation) -> Result<Bolt> {
     let feature_name = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
     let qualifier = captures.name("qualifier").map(|m|m.as_str().to_string());
     if let (Some(base_name_orig), Some(bolt_type)) = (captures.name("base"), captures.name("bolt_type")) {
-        let base_name = base_name_orig.as_str().to_string();
-        let base_name = base_name.strip_prefix("dot_")
-            .map(|stripped| ".".to_string() + stripped)
-            .unwrap_or(base_name);
-        let base_name = base_name.strip_prefix("x_").unwrap_or(&base_name).to_string();
+        let base_name = to_base_name(base_name_orig.as_str());
         let bolt_type = bolt_type.as_str();
         let bolt =
             if bolt_type == "option" {
                 Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Option}
-            } else if bolt_type == "config" {
-                create_config(base_name_orig.as_str(), &base_name, &extension, &feature_name, source)
             } else if bolt_type == "fragment" {
                 Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Fragment { qualifier } }
             } else {
@@ -723,25 +724,38 @@ fn captures_to_bolt(captures: Captures, source: FileLocation) -> Result<Bolt> {
         bail!("Internal error")
     }
 }
-
-fn create_config(base_name_orig: &str, base_name: &str, extension: &str, feature_name: &str, source: FileLocation) -> Bolt {
-    if base_name_orig == "dot" && extension == ".yaml" {
-        Bolt{
-            base_name: ".".to_string(),
-            extension: "".to_string(),
-            feature_name: feature_name.to_string(),
-            source,
-            kind: BoltKind::Config,
-        }
+fn config_captures_to_bolt(captures: Captures, source: FileLocation) -> Result<Bolt> {
+    let extension = captures.name("extension").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
+    let feature_name = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
+    if let (Some(base_name_orig), Some(format_match)) = (captures.name("base"), captures.name("format")) {
+        let base_name = to_base_name(base_name_orig.as_str());
+        let format_str = format_match.as_str();
+        let format =
+            if format_str == "toml" { ConfigFormat::TOML }
+            else if format_str == "yaml" { ConfigFormat::YAML }
+            else { bail!("Unknown config file format: {:?}", format_match) }
+        ;
+        let config =
+            Bolt{
+                base_name: base_name.to_string(),
+                extension: extension.to_string(),
+                feature_name: feature_name.to_string(),
+                source,
+                kind: BoltKind::Config { format },
+            }
+        ;
+        Ok(config)
     } else {
-        Bolt{
-            base_name: base_name.to_string(),
-            extension: extension.to_string(),
-            feature_name: feature_name.to_string(),
-            source,
-            kind: BoltKind::Config,
-        }
+        bail!("Internal error")
     }
+}
+
+fn to_base_name(base_name_orig: &str) -> String {
+    let base_name = base_name_orig.to_string();
+    let base_name = base_name.strip_prefix("dot_")
+        .map(|stripped| ".".to_string() + stripped)
+        .unwrap_or(base_name);
+    base_name.strip_prefix("x_").unwrap_or(&base_name).to_string()
 }
 
 fn add<K,I>(map: &mut AHashMap<K,Vec<I>>, key: &K, item: I)
@@ -837,17 +851,18 @@ mod test {
     fn create_thundercloud_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
             [example-thundercloud]
-            "thundercloud.yaml" = """
-            ---
-            niche:
-              name: example
-              description: Example thundercloud for demonstration purposes
-            invar-defaults:
-              write-mode: Overwrite
-              interpolate: true
-              props:
-                milk-man: Ronny Soak
-                alter-ego: Lobsang
+            "thundercloud.toml" = """
+            [niche]
+            name = "example"
+            description = "Example thundercloud for demonstration purposes"
+
+            [invar-defaults]
+            write-mode = "Overwrite"
+            interpolate = true
+
+            [invar-defaults.props]
+            milk-man = "Ronny Soak"
+            alter-ego = "Lobsang"
             """
 
             [example-thundercloud.cumulus.workshop]
@@ -869,8 +884,8 @@ mod test {
             # ==== END FRAGMENT glass-spring ====
               - "to the occasion"
             '''
-            "clock+config-glass.yaml" = """
-            write-mode: WriteNew
+            "clock+config-glass.yaml.toml" = """
+            write-mode = "WriteNew"
             """
         "#};
         trace!("TOML: [[[\n{}\n]]]", &toml_data);
@@ -904,10 +919,11 @@ mod test {
             * Milk man: ${milk-man}
             * Undefined: ${undefined}
             """
-            "clock+config-glass.yaml" = """
-            write-mode: Overwrite
-            props:
-              sweeper: Lu Tse
+            "clock+config-glass.yaml.toml" = """
+            write-mode = "Overwrite"
+
+            [props]
+            sweeper = "Lu Tse"
             """
             "clock+fragment-glass-spring.yaml" = '''
             # ==== BEGIN FRAGMENT glass-spring ====
