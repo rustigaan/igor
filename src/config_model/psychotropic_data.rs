@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use ahash::{AHashMap, AHashSet};
 use log::debug;
 use serde::{Deserialize, Serialize};
+use crate::file_system::ConfigFormat;
 use super::psychotropic::{NicheTriggers, PsychotropicConfig};
 
 #[derive(Deserialize,Serialize,Debug,Clone)]
@@ -58,6 +59,22 @@ impl NicheTriggersData {
 
 #[derive(Debug)]
 pub struct PsychotropicConfigIndex(AHashMap<String, NicheTriggersData>);
+
+impl PsychotropicConfigIndex {
+    pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self> {
+        let data: PsychotropicConfigData = match config_format {
+            ConfigFormat::TOML => toml::from_str(body)?,
+            ConfigFormat::YAML => {
+                let result = serde_yaml::from_str(body)?;
+                #[cfg(test)]
+                crate::test_utils::log_toml("Psychotropic Config", &result)?;
+                result
+            }
+        };
+
+        data_to_index(data)
+    }
+}
 
 impl PsychotropicConfig for PsychotropicConfigIndex {
     type NicheTriggersImpl = NicheTriggersData;

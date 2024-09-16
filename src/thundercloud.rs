@@ -419,7 +419,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                     ThunderCloud => get_invar_config_body(bolt.source(), &thundercloud_fs).await?,
                     Project => get_invar_config_body(bolt.source(), &project_fs).await?,
                 };
-                let bolt_invar_config = get_invar_config(bolt_invar_config_body)?;
+                let bolt_invar_config = get_invar_config(&bolt_invar_config_body, ConfigFormat::YAML)?;
                 debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
                 let new_use_config = use_config.to_owned().with_invar_config(bolt_invar_config).into_owned();
                 use_config = Cow::Owned(new_use_config);
@@ -657,8 +657,8 @@ async fn get_invar_config_body<FS: FileSystem>(source: &AbsolutePath, fs: &FS) -
     source_file_to_string(source_file).await
 }
 
-fn get_invar_config(body: String) -> Result<impl InvarConfig> {
-    let config = invar_config::from_string(body)?;
+fn get_invar_config(body: &str, config_format: ConfigFormat) -> Result<impl InvarConfig> {
+    let config = invar_config::from_str(body, config_format)?;
     debug!("Invar configuration: {config:?}");
     Ok(config)
 }
@@ -813,7 +813,7 @@ mod test {
     async fn create_niche_config<FS: FileSystem>(fs: FS) -> Result<impl NicheConfig> {
         let source_file = fs.open_source(to_absolute_path("/yeth-marthter/example/igor-thettingth.yaml")).await?;
         let body = body(source_file).await?;
-        Ok(niche_config::test_utils::from_string(body)?)
+        Ok(niche_config::from_str(&body, ConfigFormat::YAML)?)
     }
 
     async fn create_thunder_config<'a, NC: NicheConfig, TFS: FileSystem + 'a, PFS: FileSystem + 'a>(niche_configuration: &'a NC, thundercloud_fs: TFS, project_fs: PFS) -> Result<impl ThunderConfig + 'a> {

@@ -1,6 +1,5 @@
 use crate::config_model::invar_config::*;
 use std::borrow::Cow;
-use std::io::Read;
 use ahash::AHashMap;
 use anyhow::Result;
 use log::debug;
@@ -35,8 +34,13 @@ mod test_invar_config_data {
 }
 
 impl InvarConfig for InvarConfigData {
-    fn from_yaml<R: Read>(reader: R) -> Result<Self> {
-        let config: InvarConfigData = serde_yaml::from_reader(reader)?;
+    fn from_toml(body: &str) -> Result<Self> {
+        let config: InvarConfigData = toml::from_str(body)?;
+        Ok(config)
+    }
+
+    fn from_yaml(body: &str) -> Result<Self> {
+        let config: InvarConfigData = serde_yaml::from_str(body)?;
 
         #[cfg(test)]
         crate::test_utils::log_toml("Invar Config", &config)?;

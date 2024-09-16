@@ -1,4 +1,3 @@
-use std::io::Read;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use crate::file_system::FileSystem;
@@ -20,8 +19,8 @@ impl NicheConfig for NicheConfigData {
         Ok(config)
     }
 
-    fn from_yaml<R: Read>(reader: R) -> Result<Self> {
-        let config: NicheConfigData = serde_yaml::from_reader(reader)?;
+    fn from_yaml(body: &str) -> Result<Self> {
+        let config: NicheConfigData = serde_yaml::from_str(body)?;
 
         #[cfg(test)]
         crate::test_utils::log_toml("Niche Config", &config)?;

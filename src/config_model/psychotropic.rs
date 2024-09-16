@@ -1,11 +1,9 @@
 use std::fmt::Debug;
-use std::io::Read;
 use ahash::AHashSet;
 use anyhow::Result;
 use log::debug;
-use stringreader::StringReader;
-use super::psychotropic_data::{data_to_index, empty, PsychotropicConfigData, PsychotropicConfigIndex};
-use crate::file_system::{source_file_to_string, FileSystem, PathType};
+use super::psychotropic_data::{empty, PsychotropicConfigIndex};
+use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem, PathType};
 use crate::path::AbsolutePath;
 
 pub trait NicheTriggers: Debug {
@@ -23,17 +21,8 @@ pub trait PsychotropicConfig: Debug + Sized {
     fn values(&self) -> Vec<Self::NicheTriggersImpl>;
 }
 
-pub fn from_yaml<R: Read>(reader: R) -> Result<impl PsychotropicConfig> {
-    index_from_yaml(reader)
-}
-
-pub fn index_from_yaml<R: Read>(reader: R) -> Result<PsychotropicConfigIndex> {
-    let data: PsychotropicConfigData = serde_yaml::from_reader(reader)?;
-
-    #[cfg(test)]
-    crate::test_utils::log_toml("Psychotropic Config", &data)?;
-
-    data_to_index(data)
+pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl PsychotropicConfig> {
+    PsychotropicConfigIndex::from_str(body, config_format)
 }
 
 pub async fn from_path<FS: FileSystem>(source_path: &AbsolutePath, file_system: &FS) -> Result<impl PsychotropicConfig> {
@@ -44,11 +33,7 @@ pub async fn from_path<FS: FileSystem>(source_path: &AbsolutePath, file_system: 
     }
     let source_file = file_system.open_source(source_path.clone()).await?;
     let body = source_file_to_string(source_file).await?;
-    from_string(&body)
-}
-
-fn from_string(body: &str) -> Result<PsychotropicConfigIndex> {
-    index_from_yaml(StringReader::new(body))
+    PsychotropicConfigIndex::from_str(&body, ConfigFormat::YAML)
 }
 
 #[cfg(test)]
@@ -72,7 +57,7 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         // When
-        let result = from_string(&yaml)?;
+        let result = from_str(&yaml, ConfigFormat::YAML)?;
 
         // Then
         assert_eq!(result.get("example").unwrap().wait_for(), Vec::<&str>::new());
@@ -96,7 +81,7 @@ mod test {
         trace!("YAML: [{}]", &yaml);
 
         // When
-        let result = from_string(&yaml);
+        let result = from_str(&yaml, ConfigFormat::YAML);
 
         // Then
         assert!(result.is_err(), "An assumed precursor should not appear again");

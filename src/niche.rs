@@ -2,7 +2,7 @@ use anyhow::Result;
 use ahash::AHashMap;
 use log::{debug, info};
 use crate::config_model::{niche_config, NicheConfig, UseThundercloudConfig};
-use crate::file_system::{source_file_to_string, FileSystem};
+use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem};
 use crate::interpolate;
 use crate::thundercloud;
 use crate::path::AbsolutePath;
@@ -44,7 +44,7 @@ async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, fs: &FS) -> 
 
     let source_file = fs.open_source(config_path).await?;
     let body = source_file_to_string(source_file).await?;
-    let config = niche_config::from_yaml(&body)?;
+    let config = niche_config::from_str(&body, ConfigFormat::YAML)?;
     debug!("Niche configuration: {config:?}");
     let use_thundercloud = config.use_thundercloud();
     debug!("Niche simplified: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.features());

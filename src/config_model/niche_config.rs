@@ -1,37 +1,22 @@
 use super::niche_config_data::NicheConfigData;
 
 use std::fmt::Debug;
-use std::io::Read;
-use stringreader::StringReader;
 use crate::config_model::{ThunderConfig, UseThundercloudConfig};
-use crate::file_system::FileSystem;
+use crate::file_system::{ConfigFormat, FileSystem};
 use crate::path::AbsolutePath;
 
 pub trait NicheConfig : Sized + Debug {
     fn from_toml(toml_data: &str) -> Result<Self>;
-    fn from_yaml<R: Read>(reader: R) -> Result<Self>;
+    fn from_yaml(body: &str) -> Result<Self>;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
     fn new_thunder_config<TFS: FileSystem, PFS: FileSystem>(&self, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
 }
 use super::*;
 
-pub fn from_yaml(body: &str) -> Result<impl NicheConfig> {
-    NicheConfigData::from_yaml(StringReader::new(&body))
-}
-
-pub fn from_toml(body: &str) -> Result<impl NicheConfig> {
-    NicheConfigData::from_toml(&body)
-}
-
-#[cfg(test)]
-pub mod test_utils {
-    use super::*;
-    use stringreader::StringReader;
-    use crate::config_model::NicheConfig;
-
-    pub fn from_string<S: Into<String>>(body: S) -> Result<impl NicheConfig> {
-        let config: NicheConfigData = NicheConfig::from_yaml(StringReader::new(&body.into()))?;
-        Ok(config)
+pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl NicheConfig> {
+    match config_format {
+        ConfigFormat::TOML => NicheConfigData::from_toml(body),
+        ConfigFormat::YAML => NicheConfigData::from_yaml(body),
     }
 }
 
@@ -68,7 +53,7 @@ pub mod test {
         debug!("TOML: [[[\n{}\n]]]", &toml_data);
 
         // When
-        let niche_config = from_toml(toml_data)?;
+        let niche_config = from_str(toml_data, ConfigFormat::TOML)?;
 
         // Then
         let use_thundercloud = niche_config.use_thundercloud();
@@ -96,7 +81,7 @@ pub mod test {
             [use-thundercloud]
             directory = "{{PROJECT}}/example-thundercloud"
         "#};
-        let niche_config = from_toml(toml_source)?;
+        let niche_config = from_str(toml_source, ConfigFormat::TOML)?;
         let thunder_cloud_dir = AbsolutePath::try_from("/tmp")?;
         let invar_dir = AbsolutePath::try_from("/var/tmp")?;
         let project_root = AbsolutePath::try_from("/")?;
