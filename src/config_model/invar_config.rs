@@ -42,9 +42,9 @@ mod test {
     use super::*;
 
     #[test]
-    fn invar_config_from_reader() -> Result<()> {
-        let yaml_source = r#"{ "write-mode": "WriteNew" }"#;
-        let invar_config = from_str(yaml_source, ConfigFormat::YAML)?;
+    fn invar_config_from_str() -> Result<()> {
+        let toml_source = r#"write-mode = "WriteNew" "#;
+        let invar_config = from_str(toml_source, ConfigFormat::TOML)?;
         assert_eq!(invar_config.write_mode(), WriteMode::WriteNew); // From YAML
         assert_eq!(invar_config.interpolate(), true); // Default value
         assert_eq!(invar_config.props(), Cow::Owned(Table::new())); // Default value
