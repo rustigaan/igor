@@ -12,7 +12,7 @@ pub trait NicheTriggers: Debug {
     fn triggers(&self) -> &[String];
 }
 
-pub trait PsychotropicConfig: Debug + Sized {
+pub trait PsychotropicConfig: Debug + Sized + Send {
     type NicheTriggersImpl: NicheTriggers;
 
     fn independent(&self) -> AHashSet<String>;

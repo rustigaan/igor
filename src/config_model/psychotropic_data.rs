@@ -72,7 +72,7 @@ impl PsychotropicConfigIndex {
             }
         };
 
-        data_to_index(data)
+        data_to_index(&data)
     }
 }
 
@@ -119,9 +119,9 @@ impl PsychotropicConfig for PsychotropicConfigIndex {
     }
 }
 
-pub fn data_to_index(data: PsychotropicConfigData) -> Result<PsychotropicConfigIndex> {
+pub fn data_to_index(data: &PsychotropicConfigData) -> Result<PsychotropicConfigIndex> {
     let mut index: AHashMap<String, NicheTriggersData> = AHashMap::new();
-    for cue in data.cues {
+    for cue in &data.cues {
         if index.contains_key(&cue.name()) {
             return Err(anyhow!("Niche appears multiple times in psychotropic config: {:?}", &cue.name))
         }
@@ -135,7 +135,7 @@ pub fn data_to_index(data: PsychotropicConfigData) -> Result<PsychotropicConfigI
                 index.insert(dep.clone(), niche_trigger);
             }
         }
-        index.insert(cue.name().to_string(), NicheTriggersData::new(cue));
+        index.insert(cue.name().to_string(), NicheTriggersData::new(cue.clone()));
     }
     Ok(PsychotropicConfigIndex(index))
 }

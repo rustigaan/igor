@@ -7,9 +7,9 @@ use crate::interpolate;
 use crate::thundercloud;
 use crate::path::AbsolutePath;
 
-pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niche_directory: AbsolutePath, fs: FS) -> Result<()> {
+pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niche_directory: AbsolutePath, settings_base: String, fs: FS) -> Result<()> {
     let work_area = AbsolutePath::new("..", &project_root);
-    let config = get_config(&niche_directory, &fs).await?;
+    let config = get_config(&niche_directory, settings_base, &fs).await?;
     if let Some(directory) = config.use_thundercloud().directory() {
         info!("Directory: {directory:?}");
 
@@ -38,8 +38,8 @@ pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niche_dir
     Ok(())
 }
 
-async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, fs: &FS) -> Result<impl NicheConfig> {
-    let config_path = AbsolutePath::new("igor-thettingth.toml", niche_directory);
+async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, settings_base: String, fs: &FS) -> Result<impl NicheConfig> {
+    let config_path = AbsolutePath::new(settings_base + ".toml", niche_directory);
     info!("Config path: {config_path:?}");
 
     let source_file = fs.open_source(config_path).await?;
@@ -69,7 +69,7 @@ mod test {
         let niche = to_absolute_path("/yeth-marthter/example");
 
         // When
-        process_niche(project_root, niche, fs.clone()).await?;
+        process_niche(project_root, niche, "igor_thettingth".to_string(), fs.clone()).await?;
 
         // Then
         let source_file = fs.open_source(to_absolute_path("/workshop/clock.yaml")).await?;

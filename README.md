@@ -44,17 +44,43 @@ Names like featureName and placeholderName must begin with an alphabetic charact
 
 ## Configuration
 
+### Project
+
+The top-level config file is `CargoCult.toml` in the root of the project. It is optional and all its components are optional. It can be used to suppress the lisp (lithp) that is a prominent characteristic of Igor in the Diskworld novels, but that is probably a nuisance in everyday use.
+
+Property `niches-directory` of `CargoCult.toml` specifies the directory (relative to the project root) that contains all niches that specify how thunderclouds should power the project. The default value of `niches-directory` is `yeth-marthter`.
+
+Property `igor-settings` specifies the base name of the configuration file of each niche. The default value of `igor-settings` is `igor-thettingth`.
+
+The `CargoCult.toml` can also be used that some niches need to wait for other niches to complete first. This is similar to the [psychotropic](#psychotropic) behavior of the weather in Überwald.
+
+This is an example of a complete `CargoCult.toml`:
+```toml
+niches-directory = "niches"
+igor-settings = "settings"
+
+[psychotropic]
+
+[[psychotropic.cues]]
+name = "default-settings"
+
+[[psychotropic.cues]]
+wait-for = ["default-settings"]
+```
+
 ### Psychotropic
 
 Sometimes thunderclouds should not flash asynchronously at random. Just like in Überwald, the weather needs to be psychotropic. ("If you say something like 'zer dark eyes of zer mind', there would be a sudden crash of thunder"; see [Überwald in L-space](https://wiki.lspace.org/%C3%9Cberwald)).
 
-Therefore, it is allowed to place a file named `psychotropic.toml` in `yeth-marthter/` that declares which niches must wait for each other. For example:
+Therefore, it is allowed to section named [psychotropic] in `CargoCult.toml` that declares which niches must wait for each other. For example:
 
 ```toml
-[[cues]]
+[psychotropic]
+
+[[psychotropic.cues]]
 name = "default-settings"
 
-[[cues]]
+[[psychotropic.cues]]
 name = "mongo-db"
 wait-for = [ "default-settings" ]
 ```
@@ -66,7 +92,7 @@ Property `cues` is an ordered list of niches. Each niche has a `name` and a list
 So this is okay:
 
 ```toml
-[[cues]]
+[[psychotropic.cues]]
 name = "mongo-db"
 wait-for = [ "default-settings" ]
 ```
@@ -74,15 +100,37 @@ wait-for = [ "default-settings" ]
 This is not, however:
 
 ```toml
-[[cues]]
+[[psychotropic.cues]]
 name = "mongo-db"
 wait-for = [ "default-settings" ]
 
-[[cues]]
+[[psychotropic.cues]]
 name = [ "default-settings" ]
 ```
 
 The reason being that `default-settings` is assumed to appear before `mongo-db`, therefore it cannot appear after `mongo-db`.
+
+### Invar configuration
+
+Invar configuration specifies how particular options and fragments behave.
+
+This is an example invar configuration file:
+
+```toml
+write-mode = "WriteNew"
+interpolate = true
+
+[props]
+key = "value"
+```
+
+Write-mode `Overwrite` is the default: the option from the thundercloud or invar will overwrite an existing file or create a new file if it didn't exist.
+
+Write-mode `WriteNew` will create a new file if it didn't exist, but it will not overwrite an existing file.
+
+Write-mode `Ignore` will completely ignore this option.
+
+Setting interpolate to `false` will suppress interpolation of properties. Normally, occurrences of `${property_name}` will be replaced by the value of the property. This is called interpolation.
 
 ## Examples
 

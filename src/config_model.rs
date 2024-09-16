@@ -31,6 +31,9 @@ mod git_remote_config_data;
 pub mod psychotropic;
 mod psychotropic_data;
 
+pub mod project_config;
+mod project_config_data;
+
 use anyhow::Result;
 use std::borrow::Cow;
 use std::fmt::Debug;

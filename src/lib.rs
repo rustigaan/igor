@@ -16,11 +16,12 @@ mod niche;
 mod path;
 mod thundercloud;
 
-use crate::config_model::psychotropic;
+use crate::config_model::project_config;
 use crate::config_model::psychotropic::{NicheTriggers,PsychotropicConfig};
-use crate::file_system::{ConfigFormat, DirEntry, FileSystem, PathType};
+use crate::file_system::{source_file_to_string, ConfigFormat, DirEntry, FileSystem, PathType};
 use crate::niche::process_niche;
 use crate::path::AbsolutePath;
+use crate::config_model::project_config::ProjectConfig;
 
 #[derive(Parser,Debug)]
 #[command(version, about, long_about = None)]
@@ -51,12 +52,22 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     let cwd = AbsolutePath::current_dir()?;
     let project_root_path = project_root_option.unwrap_or(PathBuf::from("."));
     let project_root = AbsolutePath::new(project_root_path, &cwd);
-    let niches_directory= AbsolutePath::new("yeth-marthter", &project_root);
+
+    let project_config_path = AbsolutePath::new("CargoCult.toml", &project_root);
+    let project_config_data = if fs.path_type(&project_config_path).await == PathType::File {
+        let source_file = fs.open_source(project_config_path).await?;
+        source_file_to_string(source_file).await?
+    } else {
+        "".to_string()
+    };
+    let project_configuration = project_config::from_str(&project_config_data, ConfigFormat::TOML)?;
+
+    let niches_directory= AbsolutePath::new(project_configuration.niches_directory().as_path(), &project_root);
     info!("Niches configuration directory: {niches_directory:?}");
 
-    let psychotropic_path = AbsolutePath::new("psychotropic.toml", &niches_directory);
-    let psychotropic_config = Arc::new(psychotropic::from_path(&psychotropic_path, ConfigFormat::TOML, fs).await?);
-    info!("Psychotropic configuration: {psychotropic_config:?}");
+    let project_config = Arc::new(project_configuration);
+    info!("Project configuration: {project_config:?}");
+    let settings_base = project_config.igor_settings();
 
     let mut handles = Vec::new();
     let permits = 5;
@@ -66,9 +77,9 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     for _ in 1..permits {
         tx_permit.send(()).await?;
     }
-    let collector_join_handle = tokio::spawn(collect_done(psychotropic_config.clone(), permits, niches_directory.clone(), rx_done, tx_work.clone(), tx_permit.clone()));
+    let collector_join_handle = tokio::spawn(collect_done(project_config.clone(), permits, niches_directory.clone(), rx_done, tx_work.clone(), tx_permit.clone()));
     handles.push(collector_join_handle);
-    let emitter_join_handle = tokio::spawn(emit_niches(niches_directory.clone(), fs.clone(), psychotropic_config.clone(), tx_work.clone()));
+    let emitter_join_handle = tokio::spawn(emit_niches(niches_directory.clone(), fs.clone(), project_config.clone(), tx_work.clone()));
     handles.push(emitter_join_handle);
 
     let mut scheduled_count = None;
@@ -83,7 +94,7 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
                 }
                 debug!("Got permit for: {:?}", &niche);
                 let niche_fs = fs.clone();
-                let niche_join_handle = tokio::spawn(run_process_niche(project_root.clone(), niche.clone(), niche_fs, tx_done.clone()));
+                let niche_join_handle = tokio::spawn(run_process_niche(project_root.clone(), niche.clone(), niche_fs, settings_base.clone(), tx_done.clone()));
                 handles.push(niche_join_handle);
                 started_count += 1;
                 if scheduled_count.map(|scheduled| started_count >= scheduled).unwrap_or(false) {
@@ -115,9 +126,10 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     Ok(())
 }
 
-async fn collect_done<PC>(psychotropic_config: Arc<PC>, max_slack: usize, niches_directory: AbsolutePath, mut rx_done: Receiver<AbsolutePath>, tx_work: Sender<NicheStatus>, tx_permit: Sender<()>) -> Result<()>
-where PC: PsychotropicConfig
+async fn collect_done<PC>(project_config: Arc<PC>, max_slack: usize, niches_directory: AbsolutePath, mut rx_done: Receiver<AbsolutePath>, tx_work: Sender<NicheStatus>, tx_permit: Sender<()>) -> Result<()>
+where PC: ProjectConfig
 {
+    let psychotropic_config = project_config.psychotropic()?;
     let mut wait_count = AHashMap::new();
     let mut waiting: AHashMap<AbsolutePath, Vec<AbsolutePath>> = AHashMap::new();
     for triggers in psychotropic_config.values() {
@@ -173,16 +185,16 @@ where PC: PsychotropicConfig
     Ok(())
 }
 
-async fn emit_niches<FS, PC>(niches_directory: AbsolutePath, fs: FS, psychotropic_config: Arc<PC>, tx: Sender<NicheStatus>) -> Result<()>
+async fn emit_niches<FS, PC>(niches_directory: AbsolutePath, fs: FS, project_config: Arc<PC>, tx: Sender<NicheStatus>) -> Result<()>
 where
     FS: FileSystem,
-    PC: PsychotropicConfig,
+    PC: ProjectConfig,
 {
     let mut count = 0;
-    let mut result = do_emit_independent(&psychotropic_config, &niches_directory, &tx).await;
+    let mut result = do_emit_independent(&project_config, &niches_directory, &tx).await;
     if let Ok(independent) = &result {
         count += independent;
-        result = do_emit_niches(niches_directory, fs, &psychotropic_config, &tx).await;
+        result = do_emit_niches(niches_directory, fs, &project_config, &tx).await;
         match &result {
             Ok(niches) => {
                 count += niches;
@@ -199,9 +211,10 @@ where
     Ok(())
 }
 
-async fn do_emit_independent<PC>(psychotropic_config: &Arc<PC>, niches_directory: &AbsolutePath, tx: &Sender<NicheStatus>) -> Result<usize>
-where PC: PsychotropicConfig
+async fn do_emit_independent<PC>(project_config: &Arc<PC>, niches_directory: &AbsolutePath, tx: &Sender<NicheStatus>) -> Result<usize>
+where PC: ProjectConfig
 {
+    let psychotropic_config = project_config.psychotropic()?;
     let independent = psychotropic_config.independent();
     let mut count = 0;
     for niche in independent {
@@ -220,18 +233,20 @@ where PC: PsychotropicConfig
     Ok(count)
 }
 
-async fn do_emit_niches<FS, PC>(niches_directory: AbsolutePath, fs: FS, psychotropic_config: &Arc<PC>, tx: &Sender<NicheStatus>) -> Result<usize>
+async fn do_emit_niches<FS, PC>(niches_directory: AbsolutePath, fs: FS, project_config: &Arc<PC>, tx: &Sender<NicheStatus>) -> Result<usize>
 where
     FS: FileSystem,
-    PC: PsychotropicConfig,
+    PC: ProjectConfig,
 {
     info!("Emitting niches");
+    let psychotropic_config = project_config.psychotropic()?;
     let mut count = 0;
     let mut entries = fs.read_dir(&niches_directory).await?;
     while let Some(entry_result) = entries.next().await {
         let entry = entry_result?;
         let niche_dir = AbsolutePath::new(entry.file_name(), &niches_directory);
-        let settings_file = AbsolutePath::new("igor-thettingth.toml", &niche_dir);
+        let settings_file = project_config.igor_settings() + ".toml";
+        let settings_file = AbsolutePath::new(settings_file, &niche_dir);
         debug!("Looking for file: {:?}", &settings_file);
         if fs.path_type(&settings_file).await == PathType::File {
             let niche_name = niche_name(&niche_dir);
@@ -259,11 +274,11 @@ fn niche_path<S: Into<String>>(name: S, niches_directory: &AbsolutePath) -> Abso
     AbsolutePath::new(PathBuf::from(name.into()), niches_directory)
 }
 
-async fn run_process_niche<FS: FileSystem>(project_root: AbsolutePath, niche: AbsolutePath, niche_fs: FS, tx_done: Sender<AbsolutePath>) -> Result<()> {
+async fn run_process_niche<FS: FileSystem>(project_root: AbsolutePath, niche: AbsolutePath, niche_fs: FS, settings_base: String, tx_done: Sender<AbsolutePath>) -> Result<()> {
     debug!("Processing niche: {:?}", &niche);
-    let config_path = niche_path("igor-thettingth.toml", &niche);
+    let config_path = niche_path(settings_base.clone() + ".toml", &niche);
     let result = if niche_fs.path_type(&config_path).await == PathType::File {
-        process_niche(project_root, niche.clone(), niche_fs).await
+        process_niche(project_root, niche.clone(), settings_base, niche_fs).await
     } else {
         warn!("Not found: {:?}", &config_path);
         Ok(())
@@ -307,18 +322,24 @@ mod test {
 
     fn create_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
-            [yeth-marthter]
-            "psychotropic.toml" = '''
-            [[cues]]
+            Igor.toml = '''
+            niches-directory = "yeth-marthter"
+            igor_thettingth = "igor-thettingth"
+
+            [psychotropic]
+
+            [[psychotropic.cues]]
             name = "default-settings"
 
-            [[cues]]
+            [[psychotropic.cues]]
             name = "example"
 
-            [[cues]]
+            [[psychotropic.cues]]
             name = "non-existent"
             wait-for = ["example"]
             '''
+
+            [yeth-marthter]
 
             [yeth-marthter.example]
             "igor-thettingth.toml" = '''
