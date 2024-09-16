@@ -4,16 +4,12 @@ use crate::config_model::thundercloud_config_data::ThundercloudConfigData;
 use crate::file_system::ConfigFormat;
 
 pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl ThundercloudConfig> {
-    match config_format {
-        ConfigFormat::TOML => ThundercloudConfigData::from_toml(body),
-        ConfigFormat::YAML => ThundercloudConfigData::from_yaml(body)
-    }
+    ThundercloudConfigData::from_str(body, config_format)
 }
 
 pub trait ThundercloudConfig : Debug + Sized {
     type InvarConfigImpl : InvarConfig;
-    fn from_toml(toml_data: &str) -> Result<Self>;
-    fn from_yaml(yaml_data: &str) -> Result<Self>;
+    fn from_str(toml_data: &str, config_format: ConfigFormat) -> Result<Self>;
     fn niche(&self) -> &impl NicheDescription;
     fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
 }
