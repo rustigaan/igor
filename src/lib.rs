@@ -18,7 +18,7 @@ mod thundercloud;
 
 use crate::config_model::psychotropic;
 use crate::config_model::psychotropic::{NicheTriggers,PsychotropicConfig};
-use crate::file_system::{DirEntry, FileSystem, PathType};
+use crate::file_system::{ConfigFormat, DirEntry, FileSystem, PathType};
 use crate::niche::process_niche;
 use crate::path::AbsolutePath;
 
@@ -55,7 +55,7 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     info!("Niches configuration directory: {niches_directory:?}");
 
     let psychotropic_path = AbsolutePath::new("psychotropic.yaml", &niches_directory);
-    let psychotropic_config = Arc::new(psychotropic::from_path(&psychotropic_path, fs).await?);
+    let psychotropic_config = Arc::new(psychotropic::from_path(&psychotropic_path, ConfigFormat::YAML, fs).await?);
     info!("Psychotropic configuration: {psychotropic_config:?}");
 
     let mut handles = Vec::new();

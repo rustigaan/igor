@@ -25,7 +25,7 @@ pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl Psychotr
     PsychotropicConfigIndex::from_str(body, config_format)
 }
 
-pub async fn from_path<FS: FileSystem>(source_path: &AbsolutePath, file_system: &FS) -> Result<impl PsychotropicConfig> {
+pub async fn from_path<FS: FileSystem>(source_path: &AbsolutePath, config_format: ConfigFormat, file_system: &FS) -> Result<impl PsychotropicConfig> {
     let source_path_type = file_system.path_type(source_path).await;
     if source_path_type != PathType::File {
         debug!("Source path is not a file: {:?}: {:?}", source_path, source_path_type);
@@ -33,7 +33,7 @@ pub async fn from_path<FS: FileSystem>(source_path: &AbsolutePath, file_system: 
     }
     let source_file = file_system.open_source(source_path.clone()).await?;
     let body = source_file_to_string(source_file).await?;
-    PsychotropicConfigIndex::from_str(&body, ConfigFormat::YAML)
+    PsychotropicConfigIndex::from_str(&body, config_format)
 }
 
 #[cfg(test)]
@@ -91,10 +91,10 @@ mod test {
     async fn from_source_file() -> Result<()> {
         // Given
         let fs = create_file_system_fixture()?;
-        let path = to_absolute_path("/yeth-marthter/psychotropic.yaml");
+        let path = to_absolute_path("/yeth-marthter/psychotropic.toml");
 
         // When
-        let result = from_path(&path, &fs).await?;
+        let result = from_path(&path, ConfigFormat::TOML, &fs).await?;
 
         // Then
         assert_eq!(result.get("default-settings").unwrap().wait_for(), Vec::<&str>::new());
@@ -114,7 +114,7 @@ mod test {
         let path = to_absolute_path("/yeth-marthter");
 
         // When
-        let result = from_path(&path, &fs).await?;
+        let result = from_path(&path, ConfigFormat::TOML, &fs).await?;
 
         // Then
         assert!(result.is_empty());
@@ -122,16 +122,19 @@ mod test {
         Ok(())
     }
 
-    fn create_file_system_fixture() -> anyhow::Result<impl FileSystem> {
+    fn create_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
             [yeth-marthter]
-            "psychotropic.yaml" = '''
-            cues:
-            - name: "default-settings"
-            - name: "example"
-            - name: "non-existent"
-              wait-for:
-              - "example"
+            "psychotropic.toml" = '''
+            [[cues]]
+            name = "default-settings"
+
+            [[cues]]
+            name = "example"
+
+            [[cues]]
+            name = "non-existent"
+            wait-for = ["example"]
             '''
         "#};
         trace!("TOML: [{}]", &toml_data);
