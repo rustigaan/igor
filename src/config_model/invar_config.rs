@@ -16,8 +16,7 @@ pub enum WriteMode {
 }
 
 pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
-    fn from_toml(body: &str) -> Result<Self>;
-    fn from_yaml(body: &str) -> Result<Self>;
+    fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self>;
     fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self>;
     fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self>;
     fn with_write_mode(&self, write_mode: WriteMode) -> Cow<Self>;
@@ -35,10 +34,7 @@ pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
 }
 
 pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl InvarConfig> {
-    match config_format {
-        ConfigFormat::TOML => InvarConfigData::from_toml(body),
-        ConfigFormat::YAML => InvarConfigData::from_yaml(body),
-    }
+    InvarConfigData::from_str(body, config_format)
 }
 
 #[cfg(test)]

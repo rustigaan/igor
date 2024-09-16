@@ -5,6 +5,7 @@ use anyhow::Result;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use toml::{Table, Value};
+use crate::file_system::ConfigFormat;
 
 #[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
@@ -34,18 +35,19 @@ mod test_invar_config_data {
 }
 
 impl InvarConfig for InvarConfigData {
-    fn from_toml(body: &str) -> Result<Self> {
-        let config: InvarConfigData = toml::from_str(body)?;
-        Ok(config)
-    }
+    fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self> {
+        let invar_config: InvarConfigData = match config_format {
+            ConfigFormat::TOML => toml::from_str(body)?,
+            ConfigFormat::YAML => {
+                let result = serde_yaml::from_str(body)?;
 
-    fn from_yaml(body: &str) -> Result<Self> {
-        let config: InvarConfigData = serde_yaml::from_str(body)?;
+                #[cfg(test)]
+                crate::test_utils::log_toml("Invar Config", &result)?;
 
-        #[cfg(test)]
-        crate::test_utils::log_toml("Invar Config", &config)?;
-
-        Ok(config)
+                result
+            }
+        };
+        Ok(invar_config)
     }
 
     fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self> {

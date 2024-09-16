@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use crate::file_system::FileSystem;
+use crate::file_system::{ConfigFormat, FileSystem};
 use super::{ThunderConfig, UseThundercloudConfig, NicheConfig};
 use super::thunder_config_data::ThunderConfigData;
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
@@ -13,19 +13,19 @@ pub struct NicheConfigData {
 }
 
 impl NicheConfig for NicheConfigData {
-    fn from_toml(toml_data: &str) -> Result<Self> {
-        let config: NicheConfigData = toml::from_str(toml_data)?;
+    fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self> {
+        let niche_config: NicheConfigData = match config_format {
+            ConfigFormat::TOML => toml::from_str(body)?,
+            ConfigFormat::YAML => {
+                let result = serde_yaml::from_str(body)?;
 
-        Ok(config)
-    }
+                #[cfg(test)]
+                crate::test_utils::log_toml("Niche Config", &result)?;
 
-    fn from_yaml(body: &str) -> Result<Self> {
-        let config: NicheConfigData = serde_yaml::from_str(body)?;
-
-        #[cfg(test)]
-        crate::test_utils::log_toml("Niche Config", &config)?;
-
-        Ok(config)
+                result
+            }
+        };
+        Ok(niche_config)
     }
 
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig {

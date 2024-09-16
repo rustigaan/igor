@@ -6,18 +6,14 @@ use crate::file_system::{ConfigFormat, FileSystem};
 use crate::path::AbsolutePath;
 
 pub trait NicheConfig : Sized + Debug {
-    fn from_toml(toml_data: &str) -> Result<Self>;
-    fn from_yaml(body: &str) -> Result<Self>;
+    fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self>;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
     fn new_thunder_config<TFS: FileSystem, PFS: FileSystem>(&self, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
 }
 use super::*;
 
 pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl NicheConfig> {
-    match config_format {
-        ConfigFormat::TOML => NicheConfigData::from_toml(body),
-        ConfigFormat::YAML => NicheConfigData::from_yaml(body),
-    }
+    NicheConfigData::from_str(body, config_format)
 }
 
 #[cfg(test)]
