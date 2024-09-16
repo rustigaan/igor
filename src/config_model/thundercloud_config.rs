@@ -24,29 +24,31 @@ mod test {
     use anyhow::Result;
     use indoc::indoc;
     use log::debug;
+    use test_log::test;
     use toml::Table;
     use crate::config_model::serde_test_utils::insert_entry;
     use crate::config_model::WriteMode::Overwrite;
 
     #[test]
-    fn test_from_reader() -> Result<()> {
+    fn test_from_str() -> Result<()> {
         // Given
-        let yaml = indoc! {r#"
-                ---
-                niche:
-                  name: example
-                  description: Example thundercloud
-                invar-defaults:
-                  write-mode: Overwrite
-                  interpolate: true
-                  props:
-                    milk-man: Ronny Soak
-                    alter-ego: Lobsang
-            "#};
-        debug!("YAML: [{}]", &yaml);
+        let toml = indoc! {r#"
+            [niche]
+            name = "example"
+            description = "Example thundercloud"
+
+            [invar-defaults]
+            write-mode = "Overwrite"
+            interpolate = true
+
+            [invar-defaults.props]
+            alter-ego = "Lobsang"
+            milk-man = "Ronny Soak"
+        "#};
+        debug!("TOML: [{}]", &toml);
 
         // When
-        let thundercloud_config = from_str(yaml, ConfigFormat::YAML)?;
+        let thundercloud_config = from_str(toml, ConfigFormat::TOML)?;
 
         // Then
         assert_eq!(thundercloud_config.niche().name(), "example");
