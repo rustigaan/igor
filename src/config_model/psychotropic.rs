@@ -48,16 +48,15 @@ mod test {
     #[test]
     fn missing_precursor() -> Result<()> {
         // Given
-        let yaml = indoc! {r#"
-            cues:
-            - name: "non-existent"
-              wait-for:
-              - "example"
+        let toml = indoc! {r#"
+            [[cues]]
+            name = "non-existent"
+            wait-for = ["example"]
         "#};
-        trace!("YAML: [{}]", &yaml);
+        trace!("TOML: [{}]", &toml);
 
         // When
-        let result = from_str(&yaml, ConfigFormat::YAML)?;
+        let result = from_str(&toml, ConfigFormat::TOML)?;
 
         // Then
         assert_eq!(result.get("example").unwrap().wait_for(), Vec::<&str>::new());
@@ -71,17 +70,18 @@ mod test {
     #[test]
     fn assumed_precursor_appears_again() {
         // Given
-        let yaml = indoc! {r#"
-            cues:
-            - name: "non-existent"
-              wait-for:
-              - "example"
-            - name: "example"
+        let toml = indoc! {r#"
+            [[cues]]
+            name = "non-existent"
+            wait-for = ["example"]
+
+            [[cues]]
+            name = "example"
         "#};
-        trace!("YAML: [{}]", &yaml);
+        trace!("TOML: [{}]", &toml);
 
         // When
-        let result = from_str(&yaml, ConfigFormat::YAML);
+        let result = from_str(&toml, ConfigFormat::TOML);
 
         // Then
         assert!(result.is_err(), "An assumed precursor should not appear again");
