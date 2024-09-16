@@ -54,8 +54,8 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     let niches_directory= AbsolutePath::new("yeth-marthter", &project_root);
     info!("Niches configuration directory: {niches_directory:?}");
 
-    let psychotropic_path = AbsolutePath::new("psychotropic.yaml", &niches_directory);
-    let psychotropic_config = Arc::new(psychotropic::from_path(&psychotropic_path, ConfigFormat::YAML, fs).await?);
+    let psychotropic_path = AbsolutePath::new("psychotropic.toml", &niches_directory);
+    let psychotropic_config = Arc::new(psychotropic::from_path(&psychotropic_path, ConfigFormat::TOML, fs).await?);
     info!("Psychotropic configuration: {psychotropic_config:?}");
 
     let mut handles = Vec::new();
@@ -308,13 +308,16 @@ mod test {
     fn create_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
             [yeth-marthter]
-            "psychotropic.yaml" = '''
-            cues:
-            - name: "default-settings"
-            - name: "example"
-            - name: "non-existent"
-              wait-for:
-              - "example"
+            "psychotropic.toml" = '''
+            [[cues]]
+            name = "default-settings"
+
+            [[cues]]
+            name = "example"
+
+            [[cues]]
+            name = "non-existent"
+            wait-for = ["example"]
             '''
 
             [yeth-marthter.example]
