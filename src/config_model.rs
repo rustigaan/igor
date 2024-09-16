@@ -37,19 +37,18 @@ use std::fmt::Debug;
 
 #[cfg(test)]
 mod serde_test_utils {
-    use serde_yaml::{Mapping, Value};
+    use toml::{Table, Value};
 
     #[test]
     fn test_insert_entry() {
-        let mut mapping = Mapping::new();
+        let mut mapping = Table::new();
         insert_entry(&mut mapping, "foo", "bar");
         let mapping = mapping;
         assert_eq!(mapping.get("foo"), Some(Value::String("bar".to_string())).as_ref());
     }
 
-    pub fn insert_entry<K: Into<String>, V: Into<String>>(props: &mut Mapping, key: K, value: V) {
-        let wrapped_key = Value::String(key.into());
+    pub fn insert_entry<K: Into<String>, V: Into<String>>(props: &mut Table, key: K, value: V) {
         let wrapped_value = Value::String(value.into());
-        props.insert(wrapped_key, wrapped_value);
+        props.insert(key.into(), wrapped_value);
     }
 }

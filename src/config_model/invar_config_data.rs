@@ -4,19 +4,19 @@ use ahash::AHashMap;
 use anyhow::Result;
 use log::debug;
 use serde::{Deserialize, Serialize};
-use serde_yaml::{Mapping, Value};
+use toml::{Table, Value};
 
 #[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct InvarConfigData {
     write_mode: Option<WriteMode>,
     interpolate: Option<bool>,
-    props: Option<Mapping>,
+    props: Option<Table>,
 }
 
 impl InvarConfigData {
     pub fn new() -> InvarConfigData {
-        InvarConfigData { write_mode: None, interpolate: None, props: Some(Mapping::new()) }
+        InvarConfigData { write_mode: None, interpolate: None, props: Some(Table::new()) }
     }
 }
 
@@ -29,7 +29,7 @@ mod test_invar_config_data {
         let empty_invar_config_data = InvarConfigData::new();
         assert_eq!(empty_invar_config_data.write_mode, None);
         assert_eq!(empty_invar_config_data.interpolate, None);
-        assert_eq!(empty_invar_config_data.props, Some(Mapping::new()));
+        assert_eq!(empty_invar_config_data.props, Some(Table::new()));
     }
 }
 
@@ -97,20 +97,20 @@ impl InvarConfig for InvarConfigData {
         self.interpolate
     }
 
-    fn with_props_option(&self, props: Option<Mapping>) -> Cow<Self> {
+    fn with_props_option(&self, props: Option<Table>) -> Cow<Self> {
         let invar_config = InvarConfigData { write_mode: None, interpolate: None, props };
         self.with_invar_config(invar_config)
     }
 
-    fn with_props(&self, props: Mapping) -> Cow<Self> {
+    fn with_props(&self, props: Table) -> Cow<Self> {
         self.with_props_option(Some(props))
     }
 
-    fn props(&self) -> Cow<Mapping> {
-        self.props.as_ref().map(Cow::Borrowed).unwrap_or(Cow::Owned(Mapping::new()))
+    fn props(&self) -> Cow<Table> {
+        self.props.as_ref().map(Cow::Borrowed).unwrap_or(Cow::Owned(Table::new()))
     }
 
-    fn props_option(&self) -> &Option<Mapping> {
+    fn props_option(&self) -> &Option<Table> {
         &self.props
     }
 
@@ -132,7 +132,7 @@ fn merge_property<T: Copy + Eq>(current_value_option: Option<T>, new_value_optio
     }
 }
 
-fn merge_props<'a>(current_props_option: &'a Option<Mapping>, new_props_option: &'a Option<Mapping>, dirty: bool) -> (Cow<'a, Mapping>, bool) {
+fn merge_props<'a>(current_props_option: &'a Option<Table>, new_props_option: &'a Option<Table>, dirty: bool) -> (Cow<'a, Table>, bool) {
     if let Some(current_props) = current_props_option {
         if let Some(new_props) = new_props_option {
             for (k, v) in new_props {
@@ -150,16 +150,16 @@ fn merge_props<'a>(current_props_option: &'a Option<Mapping>, new_props_option: 
     } else if let Some(new_props) = new_props_option {
         (Cow::Borrowed(new_props), true)
     } else {
-        (Cow::Owned(Mapping::new()), true)
+        (Cow::Owned(Table::new()), true)
     }
 }
 
-fn to_string_map(props: &Mapping) -> AHashMap<String,String> {
+fn to_string_map(props: &Table) -> AHashMap<String,String> {
     props.iter().map(to_strings).filter(Option::is_some).map(Option::unwrap).collect()
 }
 
-fn to_strings(entry: (&Value, &Value)) -> Option<(String, String)> {
-    if let (Value::String(key), Value::String(val)) = entry {
+fn to_strings(entry: (&String, &Value)) -> Option<(String, String)> {
+    if let (key, Value::String(val)) = entry {
         Some((key.to_owned(), val.to_owned()))
     } else {
         None
@@ -326,7 +326,7 @@ mod test {
     #[test]
     fn with_props_from_none_to_something() {
         let invar_config = empty_invar_config();
-        let mut mapping = Mapping::new();
+        let mut mapping = Table::new();
         insert_entry(&mut mapping, "foo", "bar");
         let updated = invar_config.with_props(mapping.clone());
         assert_owned(&updated);
@@ -336,7 +336,7 @@ mod test {
     #[test]
     fn with_props_from_none_to_some_thing() {
         let invar_config = empty_invar_config();
-        let mut mapping = Mapping::new();
+        let mut mapping = Table::new();
         insert_entry(&mut mapping, "foo", "bar");
         let updated = invar_config.with_props_option(Some(mapping.clone()));
         assert_owned(&updated);
@@ -353,18 +353,18 @@ mod test {
 
         // Then
         assert_owned(&updated);
-        assert_eq!(updated.props_option(), &Some(Mapping::new()));
+        assert_eq!(updated.props_option(), &Some(Table::new()));
     }
 
     #[test]
     fn with_props_from_something_add_same() {
         // Given
-        let mut old_mapping = Mapping::new();
+        let mut old_mapping = Table::new();
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
         let invar_config = new_invar_config().with_props(old_mapping.clone()).into_owned();
-        let mut new_mapping = Mapping::new();
+        let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "foo", "bar");
 
         // When
@@ -378,12 +378,12 @@ mod test {
     #[test]
     fn with_props_from_something_add_different() {
         // Given
-        let mut old_mapping = Mapping::new();
+        let mut old_mapping = Table::new();
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
         let invar_config = new_invar_config().with_props(old_mapping.clone()).into_owned();
-        let mut new_mapping = Mapping::new();
+        let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "foo", "beep");
 
         // When
@@ -399,12 +399,12 @@ mod test {
     #[test]
     fn with_props_from_something_add_new() {
         // Given
-        let mut old_mapping = Mapping::new();
+        let mut old_mapping = Table::new();
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
         let invar_config = new_invar_config().with_props(old_mapping.clone()).into_owned();
-        let mut new_mapping = Mapping::new();
+        let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "oh", "joy");
 
         // When
@@ -420,7 +420,7 @@ mod test {
     #[test]
     fn string_props() {
         // Given
-        let mut mapping = Mapping::new();
+        let mut mapping = Table::new();
         insert_entry(&mut mapping, "foo", "bar");
         insert_entry(&mut mapping, "food", "baz");
         let invar_config = new_invar_config().with_props(mapping).into_owned();

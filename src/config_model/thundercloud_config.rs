@@ -24,7 +24,7 @@ mod test {
     use anyhow::Result;
     use indoc::indoc;
     use log::debug;
-    use serde_yaml::Mapping;
+    use toml::Table;
     use crate::config_model::serde_test_utils::insert_entry;
     use crate::config_model::WriteMode::Overwrite;
 
@@ -55,7 +55,7 @@ mod test {
         assert_eq!(invar_defaults.write_mode(), Overwrite);
         assert_eq!(invar_defaults.interpolate_option(), Some(true));
 
-        let mut mapping = Mapping::new();
+        let mut mapping = Table::new();
         insert_entry(&mut mapping, "milk-man", "Ronny Soak");
         insert_entry(&mut mapping, "alter-ego", "Lobsang");
         let mapping = mapping;
@@ -85,7 +85,7 @@ mod test {
         assert_eq!(invar_defaults.interpolate_option(), None);
         assert_eq!(invar_defaults.interpolate(), true);
 
-        let mapping = Mapping::new();
+        let mapping = Table::new();
         assert_eq!(invar_defaults.props().as_ref(), &mapping);
         Ok(())
     }

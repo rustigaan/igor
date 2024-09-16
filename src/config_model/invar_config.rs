@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
-use serde_yaml::Mapping;
+use toml::Table;
 use crate::file_system::ConfigFormat;
 
 #[derive(Deserialize,Serialize,Debug,Clone,Copy,Eq, PartialEq)]
@@ -27,10 +27,10 @@ pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
     fn with_interpolate(&self, interpolate: bool) -> Cow<Self>;
     fn interpolate(&self) -> bool;
     fn interpolate_option(&self) -> Option<bool>;
-    fn with_props_option(&self, props: Option<Mapping>) -> Cow<Self>;
-    fn with_props(&self, props: Mapping) -> Cow<Self>;
-    fn props(&self) -> Cow<Mapping>;
-    fn props_option(&self) -> &Option<Mapping>;
+    fn with_props_option(&self, props: Option<Table>) -> Cow<Self>;
+    fn with_props(&self, props: Table) -> Cow<Self>;
+    fn props(&self) -> Cow<Table>;
+    fn props_option(&self) -> &Option<Table>;
     fn string_props(&self) -> AHashMap<String,String>;
 }
 
@@ -51,7 +51,7 @@ mod test {
         let invar_config = from_str(yaml_source, ConfigFormat::YAML)?;
         assert_eq!(invar_config.write_mode(), WriteMode::WriteNew); // From YAML
         assert_eq!(invar_config.interpolate(), true); // Default value
-        assert_eq!(invar_config.props(), Cow::Owned(Mapping::new())); // Default value
+        assert_eq!(invar_config.props(), Cow::Owned(Table::new())); // Default value
         Ok(())
     }
 }

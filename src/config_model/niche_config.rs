@@ -28,8 +28,8 @@ pub mod test {
     use super::WriteMode::Ignore;
     use indoc::indoc;
     use log::debug;
-    use serde_yaml::Mapping;
     use test_log::test;
+    use toml::Table;
     use crate::file_system::fixture;
 
     #[test]
@@ -65,7 +65,7 @@ pub mod test {
         assert_eq!(invar_defaults.write_mode_option(), Some(Ignore));
         assert_eq!(invar_defaults.interpolate_option(), Some(false));
 
-        let mut mapping = Mapping::new();
+        let mut mapping = Table::new();
         insert_entry(&mut mapping, "marthter", "Jeremy");
         insert_entry(&mut mapping, "buyer", "Myra LeJean");
         insert_entry(&mut mapping, "milk-man", "Kaos");
