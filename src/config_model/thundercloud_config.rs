@@ -68,15 +68,14 @@ mod test {
     #[test]
     fn test_empty_default_invar() -> Result<()> {
         // Given
-        let yaml = indoc! {r#"
-                ---
-                niche:
-                  name: example
-            "#};
-        debug!("YAML: [{}]", &yaml);
+        let toml = indoc! {r#"
+            [niche]
+            name = "example"
+        "#};
+        debug!("TOML: [{}]", &toml);
 
         // When
-        let thundercloud_config = from_str(yaml, ConfigFormat::YAML)?;
+        let thundercloud_config = from_str(toml, ConfigFormat::TOML)?;
 
         // Then
         assert_eq!(thundercloud_config.niche().name(), "example");
