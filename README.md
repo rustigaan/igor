@@ -130,7 +130,7 @@ Write-mode `WriteNew` will create a new file if it didn't exist, but it will not
 
 Write-mode `Ignore` will completely ignore this option.
 
-Setting interpolate to `false` will suppress interpolation of properties. Normally, occurrences of `${property_name}` will be replaced by the value of the property. This is called interpolation.
+Setting interpolate to `false` will suppress interpolation of properties. Normally, occurrences of `{{property_name}}` will be replaced by the value of the property. This is called interpolation.
 
 ## Examples
 

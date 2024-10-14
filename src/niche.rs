@@ -1,6 +1,6 @@
 use anyhow::Result;
-use ahash::AHashMap;
 use log::{debug, info};
+use toml::{Table, Value};
 use crate::config_model::{niche_config, InvarConfig, NicheConfig, UseThundercloudConfig};
 use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem};
 use crate::interpolate;
@@ -13,10 +13,10 @@ pub async fn process_niche<FS: FileSystem, IC: InvarConfig>(project_root: Absolu
     if let Some(directory) = config.use_thundercloud().directory() {
         info!("Directory: {directory:?}");
 
-        let mut substitutions = AHashMap::new();
-        substitutions.insert("WORKSPACE".to_string(), work_area.to_string_lossy().to_string());
-        substitutions.insert("PROJECT".to_string(), project_root.to_string_lossy().to_string());
-        let directory = interpolate::interpolate(directory, substitutions);
+        let mut substitutions = Table::new();
+        substitutions.insert("WORKSPACE".to_string(), Value::String(work_area.to_string_lossy().to_string()));
+        substitutions.insert("PROJECT".to_string(), Value::String(project_root.to_string_lossy().to_string()));
+        let directory = interpolate::interpolate(directory, &substitutions);
 
         let current_dir = AbsolutePath::current_dir()?;
         let thundercloud_directory = AbsolutePath::new(directory.to_string(), &current_dir);

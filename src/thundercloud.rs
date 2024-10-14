@@ -9,7 +9,6 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use tokio_stream::StreamExt;
-use toml::Value;
 use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
@@ -35,7 +34,7 @@ async fn process_niche_in_context<T: ThunderConfig>(generation_context: &Generat
     debug!("Use thundercloud: {:?}", generation_context.0.use_thundercloud());
     let current_directory = RelativePath::from(".");
     let invar_config = config.invar_defaults();
-    let invar_defaults = generation_context.0.use_thundercloud().invar_defaults().into_owned();
+    let invar_defaults = generation_context.0.default_invar_config().clone();
     let invar_config = invar_config.with_invar_config(invar_defaults);
     debug!("String properties: {:?}", invar_config.string_props());
     generation_context.visit_subtree(&current_directory, FromBothCumulusAndInvar, invar_config.as_ref()).await?;
@@ -146,10 +145,6 @@ static ILLEGAL_FILE_REGEX: Lazy<Regex> = Lazy::new(|| {
 
 static FRAGMENT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new("==== (?<bracket>(BEGIN|END) )?FRAGMENT (?<feature>[a-z0-9_]+|@)(-(?<qualifier>[a-z0-9_]+))? ====").unwrap()
-});
-
-static PLACE_HOLDER_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new("\\$\\{([^{}]*)}").unwrap()
 });
 
 #[derive(Clone, Copy)]
@@ -311,6 +306,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
     {
         debug!("Generating option: {:?}: {:?}: {:?}", &option, &fragments, invar_config);
         while let Some(line) = source_file.next_line().await? {
+            let line = interpolate(&line, invar_config);
             if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
                 let feature = captures.name("feature").map(|m| m.as_str().to_string()).unwrap_or("@".to_string());
                 let qualifier = captures.name("qualifier").map(|m| m.as_str().to_string()).unwrap_or("".to_string());
@@ -323,7 +319,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 self.find_and_include_fragment(&feature, &qualifier, target_file, &fragments, invar_config).await?;
                 continue;
             }
-            send_to_writer(&line, invar_config, target_file).await?;
+            send_to_writer(&line, target_file).await?;
         }
         Ok(())
     }
@@ -365,13 +361,14 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         IC: InvarConfig
     {
         while let Some(line) = source_file.next_line().await? {
+            let line = interpolate(&line, invar_config);
             if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
                 let placeholder_feature = captures.name("feature").map(|m| m.as_str().to_string()).unwrap_or("@".to_string());
                 let placeholder_qualifier = captures.name("qualifier").map(|m| m.as_str().to_string()).unwrap_or("".to_string());
                 debug!("Found placeholder: {:?}: {:?}", &feature, &qualifier);
                 if let Some(bracket) = captures.name("bracket") {
                     if bracket.as_str() == "BEGIN " && placeholder_feature == feature && placeholder_qualifier == qualifier {
-                        send_to_writer(&line, invar_config, target_file).await?;
+                        send_to_writer(&line, target_file).await?;
                         self.copy_to_end_of_fragment(&mut source_file, &feature, &qualifier, target_file, fragments, invar_config).await?;
                     }
                 }
@@ -389,10 +386,11 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         IC: InvarConfig
     {
         while let Some(fragment_line) = lines.next_line().await? {
-            if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
+            let line = interpolate(&fragment_line, invar_config);
+            if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
                 debug!("Found inner fragment: {:?}", &captures);
                 if is_matching_end(&captures, feature, qualifier) {
-                    send_to_writer(&fragment_line, invar_config, target_file).await?;
+                    send_to_writer(&line, target_file).await?;
                     break;
                 } else {
                     if let Some(bracket) = captures.name("bracket") {
@@ -404,7 +402,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                     continue;
                 }
             }
-            send_to_writer(&fragment_line, invar_config, target_file).await?;
+            send_to_writer(&line, target_file).await?;
         }
         Ok(())
     }
@@ -615,42 +613,14 @@ fn is_matching_end(captures: &Captures, feature: &str, qualifier: &str) -> bool 
     false
 }
 
-async fn send_to_writer<IC, TF>(line: &str, invar_config: &IC, target_file: &TF) -> Result<()>
-where
-    IC: InvarConfig,
-    TF: TargetFile
-{
-    let line = interpolate(&line, invar_config);
+async fn send_to_writer<TF: TargetFile>(line: &str, target_file: &TF) -> Result<()> {
     debug!("Send to writer: {:?}", &line);
     target_file.write_line(line).await?;
     Ok(())
 }
 
 fn interpolate<IC: InvarConfig>(line: &str, invar_config: &IC) -> String {
-    let mut result = String::new();
-    let properties = invar_config.props();
-    let replacements = properties.as_ref();
-    let mut pos = 0;
-    for placeholder in PLACE_HOLDER_REGEX.captures_iter(line) {
-        if let (Some(extent), Some(expression)) = (placeholder.get(0), placeholder.get(1)) {
-            let expression = expression.as_str().to_string();
-            if let Some(Value::String(replacement)) = replacements.get(&expression) {
-                debug!("Found: [{:?}] -> [{:?}]", &expression, &replacement);
-                result.push_str(&line[pos..extent.start()]);
-                result.push_str(replacement);
-            } else {
-                debug!("Not found: [{:?}]", &expression);
-                result.push_str(&line[pos..extent.end()])
-            }
-            pos = extent.end();
-        } else {
-            debug!("No expression: [{:?}]", &line[pos..]);
-            result.push_str(&line[pos..]);
-            continue;
-        }
-    }
-    result.push_str(&line[pos..line.len()]);
-    result
+    crate::interpolate::interpolate(line, invar_config.props().as_ref()).into_owned()
 }
 
 fn void_subtree() -> (AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>) {
@@ -877,7 +847,7 @@ mod test {
             """
             "clock+option-glass.yaml" = '''
             ---
-            sweeper: "${sweeper}"
+            sweeper: "{{sweeper}}"
             raising:
               - "steam"
               - "money"
@@ -916,10 +886,10 @@ mod test {
 
             The details of this project.
 
-            * Marthter: ${marthter}
-            * Buyer: ${buyer}
-            * Milk man: ${milk-man}
-            * Undefined: ${undefined}
+            * Marthter: {{marthter}}
+            * Buyer: {{buyer}}
+            * Milk man: {{milk-man}}
+            * Undefined: {{undefined}}
             """
             "clock+config-glass.yaml.toml" = """
             write-mode = "Overwrite"

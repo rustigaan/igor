@@ -2,8 +2,8 @@
 
 Intro.
 
-* Marthter: ${marthter}
-* Buyer: ${buyer}
-* Milk man: ${milk-man}
+* Marthter: {{marthter}}
+* Buyer: {{buyer}}
+* Milk man: {{milk-man}}
 
 [//]: <#> "==== FRAGMENT @-details ===="

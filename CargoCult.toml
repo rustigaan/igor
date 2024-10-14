@@ -1,2 +1,5 @@
 niches-directory = "niches"
 igor-settings = "settings"
+
+[invar-defaults.props]
+profile = "jeroen"

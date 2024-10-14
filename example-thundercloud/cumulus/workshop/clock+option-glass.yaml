@@ -1,5 +1,5 @@
 ---
-sweeper: "${sweeper}"
+sweeper: "{{sweeper}}"
 raising:
   - "steam"
   - "money"

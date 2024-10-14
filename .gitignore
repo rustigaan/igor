@@ -1,3 +1,4 @@
 /workshop
 /target
 /.idea
+*-local.*
