@@ -69,7 +69,7 @@ mod test {
         let niche = to_absolute_path("/yeth-marthter/example");
 
         // When
-        process_niche(project_root, niche, "igor_thettingth".to_string(), fs.clone()).await?;
+        process_niche(project_root, niche, "igor-thettingth".to_string(), fs.clone()).await?;
 
         // Then
         let source_file = fs.open_source(to_absolute_path("/workshop/clock.yaml")).await?;
