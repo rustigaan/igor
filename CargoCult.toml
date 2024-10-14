@@ -1,5 +1,15 @@
 niches-directory = "niches"
 igor-settings = "settings"
 
-[invar-defaults.props]
-profile = "jeroen"
+[[psychotropic.cues]]
+name = "profile"
+
+[[psychotropic.cues]]
+name = "project-settings"
+wait-for = ["profile"]
+
+[[psychotropic.cues]]
+name = "#main"
+
+[[psychotropic.cues]]
+name = "example"

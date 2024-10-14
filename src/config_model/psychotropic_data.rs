@@ -1,3 +1,4 @@
+use std::mem::swap;
 use anyhow::{anyhow, Result};
 use ahash::{AHashMap, AHashSet};
 use log::debug;
@@ -120,12 +121,45 @@ impl PsychotropicConfig for PsychotropicConfigIndex {
 }
 
 pub fn data_to_index(data: &PsychotropicConfigData) -> Result<PsychotropicConfigIndex> {
+    let mut barriers = AHashSet::new();
+    let mut current_barrier = "#".to_string();
+    let mut current_barrier_wait_for = Vec::new();
+    let mut in_block = None;
+    barriers.insert(current_barrier.clone());
     let mut index: AHashMap<String, NicheTriggersData> = AHashMap::new();
     for cue in &data.cues {
-        if index.contains_key(&cue.name()) {
-            return Err(anyhow!("Niche appears multiple times in psychotropic config: {:?}", &cue.name))
+        let cue_name = cue.name();
+        if let Some(_) = cue_name.strip_prefix("#") {
+            if barriers.contains(&cue_name) {
+                return Err(anyhow!("Barrier appears multiple times in psychotropic config: {:?}", &cue_name));
+            }
+            if in_block.is_some() {
+                let mut name = cue_name.clone();
+                swap(&mut name, &mut current_barrier);
+                let previous_barrier_name = name.clone();
+                let mut wait_for = Vec::new();
+                swap(&mut wait_for, &mut current_barrier_wait_for);
+                let barrier_cue = NicheCueData { name, wait_for };
+                index.insert(previous_barrier_name, NicheTriggersData::new(barrier_cue));
+            } else {
+                current_barrier = cue_name.clone();
+            }
+            barriers.insert(current_barrier.clone());
+            in_block = Some(current_barrier.clone());
+            continue;
         }
-        for dep in cue.wait_for() {
+        if index.contains_key(&cue_name) {
+            return Err(anyhow!("Niche appears multiple times in psychotropic config: {:?}", &cue.name));
+        }
+        current_barrier_wait_for.push(cue_name.clone());
+        let mut wait_for = cue.wait_for();
+        let mut wait_for_extended;
+        if let Some(barrier_name) = &in_block {
+            wait_for_extended = wait_for.to_vec();
+            wait_for_extended.push(barrier_name.clone());
+            wait_for = wait_for_extended.as_slice();
+        }
+        for dep in wait_for {
             if let Some(niche_trigger) = index.get_mut(dep) {
                 niche_trigger.triggers.push(cue.name())
             } else {
