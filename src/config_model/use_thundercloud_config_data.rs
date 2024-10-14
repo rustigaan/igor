@@ -4,6 +4,7 @@ use super::invar_config_data::InvarConfigData;
 use std::borrow::Cow;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use crate::config_model::invar_config::invar_config_or_default;
 
 #[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
@@ -31,11 +32,7 @@ impl UseThundercloudConfig for UseThundercloudConfigData {
         &self.features.as_deref().unwrap_or(&EMPTY_VEC)
     }
     fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl> {
-        if let Some(invar_defaults) = &self.invar_defaults {
-            Cow::Borrowed(invar_defaults)
-        } else {
-            Cow::Owned(Self::InvarConfigImpl::new())
-        }
+        invar_config_or_default(&self.invar_defaults)
     }
     fn git_remote(&self) -> Option<&Self::GitRemoteConfigImpl> {
         self.git_remote.as_ref()

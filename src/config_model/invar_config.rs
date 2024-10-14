@@ -15,7 +15,7 @@ pub enum WriteMode {
     Ignore
 }
 
-pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
+pub trait InvarConfig : Default + Clone + Debug + Send + Sync + Sized {
     fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self>;
     fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self>;
     fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self>;
@@ -35,6 +35,14 @@ pub trait InvarConfig : Clone + Debug + Send + Sync + Sized {
 
 pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl InvarConfig> {
     InvarConfigData::from_str(body, config_format)
+}
+
+pub fn invar_config_or_default<IC: InvarConfig + Default>(option: &Option<IC>) -> Cow<IC> {
+    if let Some(invar_defaults) = option {
+        Cow::Borrowed(invar_defaults)
+    } else {
+        Cow::Owned(IC::default())
+    }
 }
 
 #[cfg(test)]

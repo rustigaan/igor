@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use crate::file_system::{ConfigFormat, FileSystem};
-use super::{ThunderConfig, UseThundercloudConfig, NicheConfig};
+use super::{ThunderConfig, UseThundercloudConfig, NicheConfig, InvarConfig};
 use super::thunder_config_data::ThunderConfigData;
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
 use crate::path::AbsolutePath;
@@ -32,9 +32,10 @@ impl NicheConfig for NicheConfigData {
         &self.use_thundercloud
     }
 
-    fn new_thunder_config<TFS: FileSystem, PFS: FileSystem>(&self, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig {
+    fn new_thunder_config<IC: InvarConfig, TFS: FileSystem, PFS: FileSystem>(&self, default_invar_config: IC, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig {
         ThunderConfigData::new(
             self.use_thundercloud.clone(),
+            default_invar_config,
             thundercloud_directory,
             invar,
             project_root,

@@ -34,6 +34,12 @@ mod test_invar_config_data {
     }
 }
 
+impl Default for InvarConfigData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InvarConfig for InvarConfigData {
     fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self> {
         let invar_config: InvarConfigData = match config_format {

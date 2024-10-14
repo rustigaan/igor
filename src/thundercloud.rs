@@ -775,8 +775,10 @@ where
 mod test {
     use indoc::indoc;
     use test_log::test;
+    use crate::config_model::invar_config;
     use crate::config_model::niche_config;
     use crate::config_model::niche_config::NicheConfig;
+    use crate::file_system::ConfigFormat::TOML;
     use crate::file_system::fixture;
     use crate::path::test_utils::to_absolute_path;
     use super::*;
@@ -834,7 +836,7 @@ mod test {
         let project_root = to_absolute_path("/");
         let thundercloud_directory = to_absolute_path("/example-thundercloud");
         let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
-        let thunder_config = niche_configuration.new_thunder_config(thundercloud_fs, thundercloud_directory, project_fs, invar_directory, project_root);
+        let thunder_config = niche_configuration.new_thunder_config(invar_config::from_str("", TOML)?, thundercloud_fs, thundercloud_directory, project_fs, invar_directory, project_root);
         Ok(thunder_config)
     }
 

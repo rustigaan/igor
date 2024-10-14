@@ -1,10 +1,11 @@
 use std::fmt::Debug;
-use crate::config_model::UseThundercloudConfig;
+use crate::config_model::{InvarConfig, UseThundercloudConfig};
 use crate::file_system::{DirEntry,FileSystem};
 use crate::path::AbsolutePath;
 
 pub trait ThunderConfig : Debug + Send + Sync {
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
+    fn default_invar_config(&self) -> &impl InvarConfig;
     fn thundercloud_directory(&self) -> &AbsolutePath;
     fn cumulus(&self) -> &AbsolutePath;
     fn invar(&self) -> &AbsolutePath;

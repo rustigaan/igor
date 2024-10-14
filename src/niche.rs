@@ -1,13 +1,13 @@
 use anyhow::Result;
 use ahash::AHashMap;
 use log::{debug, info};
-use crate::config_model::{niche_config, NicheConfig, UseThundercloudConfig};
+use crate::config_model::{niche_config, InvarConfig, NicheConfig, UseThundercloudConfig};
 use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem};
 use crate::interpolate;
 use crate::thundercloud;
 use crate::path::AbsolutePath;
 
-pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niche_directory: AbsolutePath, settings_base: String, fs: FS) -> Result<()> {
+pub async fn process_niche<FS: FileSystem, IC: InvarConfig>(project_root: AbsolutePath, niche_directory: AbsolutePath, settings_base: String, invar_config_default: IC, fs: FS) -> Result<()> {
     let work_area = AbsolutePath::new("..", &project_root);
     let config = get_config(&niche_directory, settings_base, &fs).await?;
     if let Some(directory) = config.use_thundercloud().directory() {
@@ -24,6 +24,7 @@ pub async fn process_niche<FS: FileSystem>(project_root: AbsolutePath, niche_dir
         let mut invar = niche_directory.clone();
         invar.push("invar");
         let thunder_config = config.new_thunder_config(
+            invar_config_default,
             fs.clone().read_only(),
             thundercloud_directory,
             fs,
@@ -56,7 +57,9 @@ mod test {
     use indoc::indoc;
     use log::trace;
     use test_log::test;
+    use crate::config_model::invar_config;
     use crate::file_system::{fixture, FileSystem};
+    use crate::file_system::ConfigFormat::TOML;
     use crate::path::test_utils::to_absolute_path;
     use super::*;
 
@@ -67,9 +70,10 @@ mod test {
 
         let project_root = to_absolute_path("/");
         let niche = to_absolute_path("/yeth-marthter/example");
+        let default_invar_config = invar_config::from_str("", TOML)?;
 
         // When
-        process_niche(project_root, niche, "igor-thettingth".to_string(), fs.clone()).await?;
+        process_niche(project_root, niche, "igor-thettingth".to_string(), default_invar_config, fs.clone()).await?;
 
         // Then
         let source_file = fs.open_source(to_absolute_path("/workshop/clock.yaml")).await?;

@@ -67,7 +67,6 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
 
     let project_config = Arc::new(project_configuration);
     info!("Project configuration: {project_config:?}");
-    let settings_base = project_config.igor_settings();
 
     let mut handles = Vec::new();
     let permits = 5;
@@ -94,7 +93,7 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
                 }
                 debug!("Got permit for: {:?}", &niche);
                 let niche_fs = fs.clone();
-                let niche_join_handle = tokio::spawn(run_process_niche(project_root.clone(), niche.clone(), niche_fs, settings_base.clone(), tx_done.clone()));
+                let niche_join_handle = tokio::spawn(run_process_niche(project_root.clone(), niche.clone(), niche_fs, project_config.clone(), tx_done.clone()));
                 handles.push(niche_join_handle);
                 started_count += 1;
                 if scheduled_count.map(|scheduled| started_count >= scheduled).unwrap_or(false) {
@@ -274,11 +273,12 @@ fn niche_path<S: Into<String>>(name: S, niches_directory: &AbsolutePath) -> Abso
     AbsolutePath::new(PathBuf::from(name.into()), niches_directory)
 }
 
-async fn run_process_niche<FS: FileSystem>(project_root: AbsolutePath, niche: AbsolutePath, niche_fs: FS, settings_base: String, tx_done: Sender<AbsolutePath>) -> Result<()> {
+async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: AbsolutePath, niche_fs: FS, project_config: Arc<PC>, tx_done: Sender<AbsolutePath>) -> Result<()> {
     debug!("Processing niche: {:?}", &niche);
+    let settings_base = project_config.igor_settings();
     let config_path = niche_path(settings_base.clone() + ".toml", &niche);
     let result = if niche_fs.path_type(&config_path).await == PathType::File {
-        process_niche(project_root, niche.clone(), settings_base, niche_fs).await
+        process_niche(project_root, niche.clone(), settings_base, project_config.invar_defaults().into_owned(), niche_fs).await
     } else {
         warn!("Not found: {:?}", &config_path);
         Ok(())

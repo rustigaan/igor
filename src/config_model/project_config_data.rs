@@ -1,5 +1,8 @@
+use std::borrow::Cow;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use crate::config_model::invar_config::invar_config_or_default;
+use crate::config_model::invar_config_data::InvarConfigData;
 use crate::config_model::project_config::ProjectConfig;
 use crate::config_model::psychotropic::PsychotropicConfig;
 use crate::config_model::psychotropic_data;
@@ -12,11 +15,14 @@ use crate::path::RelativePath;
 pub struct ProjectConfigData {
     niches_directory: Option<String>,
     igor_settings: Option<String>,
-    psychotropic: Option<PsychotropicConfigData>
+    psychotropic: Option<PsychotropicConfigData>,
+    invar_defaults: Option<InvarConfigData>,
 }
 
 impl ProjectConfig for ProjectConfigData {
-    fn from_str(data: &str, config_format: ConfigFormat) -> anyhow::Result<Self> {
+    type InvarConfigImpl = InvarConfigData;
+
+    fn from_str(data: &str, config_format: ConfigFormat) -> Result<Self> {
         let project_config: ProjectConfigData = match config_format {
             ConfigFormat::TOML => toml::from_str(data)?,
             ConfigFormat::YAML => {
@@ -49,5 +55,9 @@ impl ProjectConfig for ProjectConfigData {
         } else {
             Ok(psychotropic_data::empty())
         }
+    }
+
+    fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl> {
+        invar_config_or_default(&self.invar_defaults)
     }
 }

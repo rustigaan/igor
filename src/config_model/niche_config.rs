@@ -8,7 +8,7 @@ use crate::path::AbsolutePath;
 pub trait NicheConfig : Sized + Debug {
     fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self>;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
-    fn new_thunder_config<TFS: FileSystem, PFS: FileSystem>(&self, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
+    fn new_thunder_config<IC: InvarConfig, TFS: FileSystem, PFS: FileSystem>(&self, default_invar_config: IC, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
 }
 use super::*;
 
@@ -26,6 +26,8 @@ pub mod test {
     use log::debug;
     use test_log::test;
     use toml::Table;
+    use crate::config_model::invar_config;
+    use crate::file_system::ConfigFormat::TOML;
     use crate::file_system::fixture;
 
     #[test]
@@ -83,9 +85,10 @@ pub mod test {
         let project_root = AbsolutePath::try_from("/")?;
         let cumulus = AbsolutePath::new("cumulus", &thunder_cloud_dir);
         let fs = fixture::from_toml("")?;
+        let default_invar_config = invar_config::from_str("", TOML)?;
 
         // When
-        let thunder_config = niche_config.new_thunder_config(fs.clone(), thunder_cloud_dir.clone(), fs.clone(), invar_dir.clone(), project_root.clone());
+        let thunder_config = niche_config.new_thunder_config(default_invar_config, fs.clone(), thunder_cloud_dir.clone(), fs.clone(), invar_dir.clone(), project_root.clone());
 
         // Then
         assert_eq!(thunder_config.use_thundercloud().directory(), niche_config.use_thundercloud().directory());
