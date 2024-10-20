@@ -806,7 +806,7 @@ mod test {
         let project_root = to_absolute_path("/");
         let thundercloud_directory = to_absolute_path("/example-thundercloud");
         let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
-        let thunder_config = niche_configuration.new_thunder_config(invar_config::from_str("", TOML)?, thundercloud_fs, thundercloud_directory, project_fs, invar_directory, project_root);
+        let thunder_config = niche_configuration.use_thundercloud().new_thunder_config(invar_config::from_str("", TOML)?, thundercloud_fs, thundercloud_directory, project_fs, invar_directory, project_root);
         Ok(thunder_config)
     }
 

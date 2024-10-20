@@ -1,10 +1,13 @@
-use super::{UseThundercloudConfig,OnIncoming};
+use super::{UseThundercloudConfig, OnIncoming, InvarConfig, ThunderConfig};
 use super::git_remote_config_data::GitRemoteConfigData;
 use super::invar_config_data::InvarConfigData;
 use std::borrow::Cow;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use crate::config_model::invar_config::invar_config_or_default;
+use crate::config_model::thunder_config_data::ThunderConfigData;
+use crate::file_system::FileSystem;
+use crate::path::AbsolutePath;
 
 #[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
@@ -36,5 +39,16 @@ impl UseThundercloudConfig for UseThundercloudConfigData {
     }
     fn git_remote(&self) -> Option<&Self::GitRemoteConfigImpl> {
         self.git_remote.as_ref()
+    }
+    fn new_thunder_config<IC: InvarConfig, TFS: FileSystem, PFS: FileSystem>(&self, default_invar_config: IC, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig {
+        ThunderConfigData::new(
+            self.clone(),
+            default_invar_config,
+            thundercloud_directory,
+            invar,
+            project_root,
+            thundercloud_fs,
+            project_fs
+        )
     }
 }

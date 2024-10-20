@@ -3,12 +3,10 @@ use super::niche_config_data::NicheConfigData;
 use std::fmt::Debug;
 use crate::config_model::{ThunderConfig, UseThundercloudConfig};
 use crate::file_system::{ConfigFormat, FileSystem};
-use crate::path::AbsolutePath;
 
 pub trait NicheConfig : Sized + Debug {
     fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self>;
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
-    fn new_thunder_config<IC: InvarConfig, TFS: FileSystem, PFS: FileSystem>(&self, default_invar_config: IC, thundercloud_fs: TFS, thundercloud_directory: AbsolutePath, project_fs: PFS, invar: AbsolutePath, project_root: AbsolutePath) -> impl ThunderConfig;
 }
 use super::*;
 
@@ -69,33 +67,6 @@ pub mod test {
         insert_entry(&mut mapping, "milk-man", "Kaos");
         assert_eq!(invar_defaults.props().into_owned(), mapping);
 
-        Ok(())
-    }
-
-    #[test]
-    pub fn test_new_thunder_config() -> Result<()> {
-        // Given
-        let toml_source = indoc! {r#"
-            [use-thundercloud]
-            directory = "{{PROJECT}}/example-thundercloud"
-        "#};
-        let niche_config = from_str(toml_source, ConfigFormat::TOML)?;
-        let thunder_cloud_dir = AbsolutePath::try_from("/tmp")?;
-        let invar_dir = AbsolutePath::try_from("/var/tmp")?;
-        let project_root = AbsolutePath::try_from("/")?;
-        let cumulus = AbsolutePath::new("cumulus", &thunder_cloud_dir);
-        let fs = fixture::from_toml("")?;
-        let default_invar_config = invar_config::from_str("", TOML)?;
-
-        // When
-        let thunder_config = niche_config.new_thunder_config(default_invar_config, fs.clone(), thunder_cloud_dir.clone(), fs.clone(), invar_dir.clone(), project_root.clone());
-
-        // Then
-        assert_eq!(thunder_config.use_thundercloud().directory(), niche_config.use_thundercloud().directory());
-        assert_eq!(thunder_config.project_root().as_path(), project_root.as_path());
-        assert_eq!(thunder_config.thundercloud_directory().as_path(), thunder_cloud_dir.as_path());
-        assert_eq!(thunder_config.invar().as_path(), invar_dir.as_path());
-        assert_eq!(thunder_config.cumulus().as_path(), cumulus.as_path());
         Ok(())
     }
 }

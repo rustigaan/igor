@@ -5,7 +5,7 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use anyhow::Result;
 use clap::Parser;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_stream::StreamExt;
 
@@ -43,8 +43,23 @@ pub async fn igor() -> Result<()> {
     application(arguments.project_root, &fs).await
 }
 
+#[derive(Clone,Debug,Hash,PartialEq,Eq)]
+struct NicheName(String);
+
+impl NicheName {
+    fn new<S: Into<String>>(name: S) -> Self {
+        NicheName(name.into())
+    }
+    fn to_string(&self) -> String {
+        self.0.clone()
+    }
+    fn to_str(&self) -> &str {
+        &self.0
+    }
+}
+
 enum NicheStatus {
-    Run(AbsolutePath),
+    Run(NicheName),
     AllScheduled(usize),
 }
 
@@ -76,9 +91,9 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     for _ in 1..permits {
         tx_permit.send(()).await?;
     }
-    let collector_join_handle = tokio::spawn(collect_done(project_config.clone(), permits, niches_directory.clone(), rx_done, tx_work.clone(), tx_permit.clone()));
+    let collector_join_handle = tokio::spawn(collect_done(project_config.clone(), permits, rx_done, tx_work.clone(), tx_permit.clone()));
     handles.push(collector_join_handle);
-    let emitter_join_handle = tokio::spawn(emit_niches(niches_directory.clone(), fs.clone(), project_config.clone(), tx_work.clone()));
+    let emitter_join_handle = tokio::spawn(emit_niches(project_config.clone(), tx_work.clone()));
     handles.push(emitter_join_handle);
 
     let mut scheduled_count = None;
@@ -125,28 +140,28 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     Ok(())
 }
 
-async fn collect_done<PC>(project_config: Arc<PC>, max_slack: usize, niches_directory: AbsolutePath, mut rx_done: Receiver<AbsolutePath>, tx_work: Sender<NicheStatus>, tx_permit: Sender<()>) -> Result<()>
+async fn collect_done<PC>(project_config: Arc<PC>, max_slack: usize, mut rx_done: Receiver<NicheName>, tx_work: Sender<NicheStatus>, tx_permit: Sender<()>) -> Result<()>
 where PC: ProjectConfig
 {
     let psychotropic_config = project_config.psychotropic()?;
     let mut wait_count = AHashMap::new();
-    let mut waiting: AHashMap<AbsolutePath, Vec<AbsolutePath>> = AHashMap::new();
+    let mut waiting: AHashMap<NicheName, Vec<NicheName>> = AHashMap::new();
     for triggers in psychotropic_config.values() {
-        let later = niche_path(triggers.name(), &niches_directory);
+        let later = NicheName::new(triggers.name());
         wait_count.insert(later.clone(), triggers.wait_for().len());
         for dep in triggers.wait_for() {
-            let dep_path = niche_path(dep, &niches_directory);
-            if let Some(existing) = waiting.get_mut(&dep_path) {
+            let dep_name = NicheName::new(dep);
+            if let Some(existing) = waiting.get_mut(&dep_name) {
                 existing.push(later.clone());
             } else {
                 let new_list = vec![later.clone()];
-                waiting.insert(dep_path.clone(), new_list);
+                waiting.insert(dep_name.clone(), new_list);
             }
         }
     }
 
     let mut slack = max_slack;
-    let mut ready: Vec<AbsolutePath> = Vec::new();
+    let mut ready: Vec<NicheName> = Vec::new();
     while let Some(niche_path) = rx_done.recv().await {
         debug!("Send permit");
         tx_permit.send(()).await?;
@@ -184,24 +199,16 @@ where PC: ProjectConfig
     Ok(())
 }
 
-async fn emit_niches<FS, PC>(niches_directory: AbsolutePath, fs: FS, project_config: Arc<PC>, tx: Sender<NicheStatus>) -> Result<()>
+async fn emit_niches<PC>(project_config: Arc<PC>, tx: Sender<NicheStatus>) -> Result<()>
 where
-    FS: FileSystem,
     PC: ProjectConfig,
 {
     let mut count = 0;
-    let mut result = do_emit_independent(&project_config, &niches_directory, &tx).await;
+    let result = do_emit_independent(&project_config, &tx).await;
     if let Ok(independent) = &result {
         count += independent;
-        result = do_emit_niches(niches_directory, fs, &project_config, &tx).await;
-        match &result {
-            Ok(niches) => {
-                count += niches;
-            },
-            _ => {
-                count = 0; // Wrap up as quickly as possible
-            }
-        }
+    } else {
+        error!("Error while emitting independent niches: {:?}", result);
     }
     debug!("Send all scheduled: {:?}", count);
     tx.send(NicheStatus::AllScheduled(count)).await?;
@@ -210,17 +217,16 @@ where
     Ok(())
 }
 
-async fn do_emit_independent<PC>(project_config: &Arc<PC>, niches_directory: &AbsolutePath, tx: &Sender<NicheStatus>) -> Result<usize>
+async fn do_emit_independent<PC>(project_config: &Arc<PC>, tx: &Sender<NicheStatus>) -> Result<usize>
 where PC: ProjectConfig
 {
     let psychotropic_config = project_config.psychotropic()?;
     let independent = psychotropic_config.independent();
     let mut count = 0;
     for niche in independent {
-        let niche_path = AbsolutePath::new(niche, niches_directory);
-        debug!("Send independent: {:?}", &niche_path);
-        tx.send(NicheStatus::Run(niche_path.clone())).await?;
-        debug!("Independent sent: {:?}", &niche_path);
+        debug!("Send independent: {:?}", &niche);
+        tx.send(NicheStatus::Run(NicheName::new(&niche))).await?;
+        debug!("Independent sent: {:?}", &niche);
         count += 1;
     }
     for triggers in psychotropic_config.values() {
@@ -232,39 +238,6 @@ where PC: ProjectConfig
     Ok(count)
 }
 
-async fn do_emit_niches<FS, PC>(niches_directory: AbsolutePath, fs: FS, project_config: &Arc<PC>, tx: &Sender<NicheStatus>) -> Result<usize>
-where
-    FS: FileSystem,
-    PC: ProjectConfig,
-{
-    info!("Emitting niches");
-    let psychotropic_config = project_config.psychotropic()?;
-    let mut count = 0;
-    let mut entries = fs.read_dir(&niches_directory).await?;
-    while let Some(entry_result) = entries.next().await {
-        let entry = entry_result?;
-        let niche_dir = AbsolutePath::new(entry.file_name(), &niches_directory);
-        let settings_file = project_config.igor_settings() + ".toml";
-        let settings_file = AbsolutePath::new(settings_file, &niche_dir);
-        debug!("Looking for file: {:?}", &settings_file);
-        if fs.path_type(&settings_file).await == PathType::File {
-            let niche_name = niche_name(&niche_dir);
-            if let Some(_) = psychotropic_config.get(&niche_name) {
-                debug!("Postpone niche: {:?}", &niche_dir);
-                continue;
-            }
-            debug!("Schedule niche: {:?}", &niche_dir);
-            tx.send(NicheStatus::Run(niche_dir.clone())).await?;
-            debug!("Niche scheduled: {:?}", &niche_dir);
-            count += 1;
-        } else {
-            debug!("Not a file: {:?}", &settings_file);
-        }
-    }
-    info!("Emitted niches");
-    Ok(count)
-}
-
 fn niche_name(niche: &AbsolutePath) -> String {
     niche.file_name().map(OsStr::to_string_lossy).map_or_else(String::new, Cow::into_owned)
 }
@@ -273,14 +246,17 @@ fn niche_path<S: Into<String>>(name: S, niches_directory: &AbsolutePath) -> Abso
     AbsolutePath::new(PathBuf::from(name.into()), niches_directory)
 }
 
-async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: AbsolutePath, niche_fs: FS, project_config: Arc<PC>, tx_done: Sender<AbsolutePath>) -> Result<()> {
+async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: NicheName, niche_fs: FS, project_config: Arc<PC>, tx_done: Sender<NicheName>) -> Result<()> {
     debug!("Processing niche: {:?}", &niche);
-    let settings_base = project_config.igor_settings();
-    let config_path = niche_path(settings_base.clone() + ".toml", &niche);
-    let result = if niche_fs.path_type(&config_path).await == PathType::File {
-        process_niche(project_root, niche.clone(), settings_base, project_config.invar_defaults().into_owned(), niche_fs).await
+    let psychotropic = project_config.psychotropic()?;
+    let use_thundercloud_option = psychotropic
+        .get(niche.to_str())
+        .map(NicheTriggers::use_thundercloud).flatten();
+    let result = if let Some(use_thundercloud) = use_thundercloud_option {
+        let niches_directory = project_config.niches_directory();
+        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), project_config.invar_defaults().into_owned(), niche_fs).await
     } else {
-        warn!("Not found: {:?}", &config_path);
+        warn!("Niche not found: {:?}", &niche);
         Ok(())
     };
     debug!("Send done: {:?}", &niche);
@@ -322,7 +298,7 @@ mod test {
 
     fn create_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
-            Igor.toml = '''
+            "CargoCult.toml" = '''
             niches-directory = "yeth-marthter"
             igor_thettingth = "igor-thettingth"
 
@@ -334,6 +310,10 @@ mod test {
             [[psychotropic.cues]]
             name = "example"
 
+            [psychotropic.cues.use-thundercloud]
+            directory = "{{PROJECT}}/example-thundercloud"
+            features = ["glass"]
+
             [[psychotropic.cues]]
             name = "non-existent"
             wait-for = ["example"]
@@ -342,11 +322,6 @@ mod test {
             [yeth-marthter]
 
             [yeth-marthter.example]
-            "igor-thettingth.toml" = '''
-            [use-thundercloud]
-            directory = "{{PROJECT}}/example-thundercloud"
-            features = ["glass"]
-            '''
 
             [yeth-marthter.example.invar.workshop]
             "clock+config-glass.yaml.toml" = """

@@ -29,9 +29,11 @@ pub use git_remote_config::GitRemoteConfig;
 mod git_remote_config_data;
 
 pub mod psychotropic;
+pub use psychotropic::{NicheTriggers, PsychotropicConfig};
 mod psychotropic_data;
 
 pub mod project_config;
+pub use project_config::ProjectConfig;
 mod project_config_data;
 
 use anyhow::Result;
