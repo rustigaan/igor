@@ -42,6 +42,7 @@ async fn process_niche_in_context<T: ThunderConfig>(generation_context: &Generat
 }
 
 async fn get_config<FS: FileSystem>(thundercloud_directory: &AbsolutePath, fs: FS) -> Result<impl ThundercloudConfig> {
+    debug!("Get config: {:?}", thundercloud_directory);
     let source_file;
     let config_format;
     let config_toml = AbsolutePath::new("thundercloud.toml", &thundercloud_directory);
@@ -252,7 +253,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 continue;
             }
             let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
-            let half_config = self.update_invar_config(invar_config, &bolt_lists.0).await?;
+            let half_config = self.update_invar_config(use_config.as_ref(), &bolt_lists.0).await?;
             let whole_config = self.update_invar_config(half_config.as_ref(), &bolt_lists.1).await?;
             let (option, bolts) = self.combine_and_filter_bolt_lists(&bolt_lists.0, &bolt_lists.1);
             self.generate_file(&target_file, option, bolts, whole_config.as_ref()).await?;
@@ -524,14 +525,14 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 let source_path = RelativePath::from(file_name.as_str()).relative_to(directory);
                 let source = FileLocation { path: source_path, context: directory_location.context() };
                 let bolt;
-                if let Some(captures) = BOLT_REGEX_WITH_DOT.captures(&file_name) {
+                if let Some(captures) = CONFIG_REGEX.captures(&file_name) {
+                    bolt = config_captures_to_bolt(captures, source)?;
+                } else if let Some(captures) = BOLT_REGEX_WITH_DOT.captures(&file_name) {
                     debug!("Bolt regex with dot: {:?}", &file_name);
                     bolt = captures_to_bolt(captures, source)?;
                 } else if let Some(captures) = BOLT_REGEX_WITHOUT_DOT.captures(&file_name) {
                     debug!("Bolt regex without dot: {:?}", &file_name);
                     bolt = captures_to_bolt(captures, source)?;
-                } else if let Some(captures) = CONFIG_REGEX.captures(&file_name) {
-                    bolt = config_captures_to_bolt(captures, source)?;
                 } else if let Some(captures) = PLAIN_FILE_REGEX_WITH_DOT.captures(&file_name) {
                     debug!("Plain file regex with dot: {:?}", &file_name);
                     let (base_name, extension) =
@@ -745,9 +746,7 @@ where
 mod test {
     use indoc::indoc;
     use test_log::test;
-    use crate::config_model::invar_config;
-    use crate::config_model::niche_config;
-    use crate::config_model::niche_config::NicheConfig;
+    use crate::config_model::{project_config, NicheTriggers, ProjectConfig, PsychotropicConfig};
     use crate::file_system::ConfigFormat::TOML;
     use crate::file_system::fixture;
     use crate::path::test_utils::to_absolute_path;
@@ -758,8 +757,13 @@ mod test {
         // Given
         let thundercloud_fs = create_thundercloud_file_system_fixture()?.read_only();
         let project_fs = create_project_file_system_fixture()?;
-        let niche_configuration = create_niche_config(project_fs.clone()).await?;
-        let thunder_config = create_thunder_config(&niche_configuration, thundercloud_fs.clone(), project_fs.clone()).await?;
+        let project_config = create_project_config(project_fs.clone()).await?;
+        let niche_triggers = get_niche_triggers(&project_config)?;
+        let default_invar_config = niche_triggers.use_thundercloud().unwrap().invar_defaults().into_owned();
+        let project_root = to_absolute_path("/");
+        let thundercloud_directory = to_absolute_path("/example-thundercloud");
+        let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
+        let thunder_config = niche_triggers.use_thundercloud().unwrap().new_thunder_config(default_invar_config, thundercloud_fs.clone(), thundercloud_directory.clone(), project_fs.clone(), invar_directory.clone(), project_root.clone());
         let generation_context = GenerationContext(thunder_config);
 
         // When
@@ -768,14 +772,15 @@ mod test {
         // Then
         result?;
 
-        let source_path = to_absolute_path("/workshop/clock.yaml");
         let fs = generation_context.0.project_file_system();
+
+        let source_path = to_absolute_path("/workshop/clock.yaml");
         let source_file = fs.open_source(source_path).await?;
         let body = source_file_to_string(source_file).await?;
 
         let yaml = indoc! {r#"
             ---
-            sweeper: "Lu Tse"
+            sweeper: "Lobsang"
             raising:
               - "steam"
               - "money"
@@ -793,21 +798,30 @@ mod test {
 
         assert_eq!(body, yaml);
 
+        let kermie_source_path = to_absolute_path("/workshop/x_x");
+        let kermie_source_file = fs.open_source(kermie_source_path).await?;
+        let kermie_body = source_file_to_string(kermie_source_file).await?;
+
+        let kermie_yaml = indoc! {r#"
+            Miss Piggy
+            Sweeper: Lao Tse
+        "#};
+
+        assert_eq!(kermie_body, kermie_yaml);
+
         Ok(())
     }
 
-    async fn create_niche_config<FS: FileSystem>(fs: FS) -> Result<impl NicheConfig> {
-        let source_file = fs.open_source(to_absolute_path("/yeth-marthter/example/igor-thettingth.toml")).await?;
+    async fn create_project_config<FS: FileSystem>(fs: FS) -> Result<impl ProjectConfig> {
+        let source_file = fs.open_source(to_absolute_path("/CargoCult.toml")).await?;
         let body = body(source_file).await?;
-        Ok(niche_config::from_str(&body, ConfigFormat::TOML)?)
+        Ok(project_config::from_str(&body, TOML)?)
     }
 
-    async fn create_thunder_config<'a, NC: NicheConfig, TFS: FileSystem + 'a, PFS: FileSystem + 'a>(niche_configuration: &'a NC, thundercloud_fs: TFS, project_fs: PFS) -> Result<impl ThunderConfig + 'a> {
-        let project_root = to_absolute_path("/");
-        let thundercloud_directory = to_absolute_path("/example-thundercloud");
-        let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
-        let thunder_config = niche_configuration.use_thundercloud().new_thunder_config(invar_config::from_str("", TOML)?, thundercloud_fs, thundercloud_directory, project_fs, invar_directory, project_root);
-        Ok(thunder_config)
+    fn get_niche_triggers<PC: ProjectConfig>(project_config: &PC) -> Result<impl NicheTriggers + '_> {
+        let psychotropic_config = project_config.psychotropic()?;
+        let niche_triggers = psychotropic_config.get("example");
+        niche_triggers.map(|nt| nt.clone()).ok_or_else(|| anyhow!("Niche not found: 'example'"))
     }
 
     // Utilities
@@ -847,7 +861,7 @@ mod test {
             """
             "clock+option-glass.yaml" = '''
             ---
-            sweeper: "{{sweeper}}"
+            sweeper: "{{alter-ego}}"
             raising:
               - "steam"
               - "money"
@@ -859,6 +873,10 @@ mod test {
             "clock+config-glass.yaml.toml" = """
             write-mode = "WriteNew"
             """
+            "x_x_x+option-kermie" = '''
+            Miss Piggy
+            Sweeper: {{sweeper}}
+            '''
         "#};
         trace!("TOML: [[[\n{}\n]]]", &toml_data);
 
@@ -867,17 +885,10 @@ mod test {
 
     fn create_project_file_system_fixture() -> Result<impl FileSystem> {
         let toml_data = indoc! {r#"
-            [yeth-marthter.example]
-            "igor-thettingth.toml" = '''
-            [use-thundercloud]
-            directory = "{{PROJECT}}/example-thundercloud"
-            on-incoming = "Update"
-            features = ["glass", "bash_config", "kermie"]
-
-            [use-thundercloud.invar-defaults.props]
-            marthter = "Jeremy"
-            buyer = "Myra LeJean"
-            milk-man = "Kaos"
+            "CargoCult.toml" = '''
+            [[psychotropic.cues]]
+            name = "example"
+            use-thundercloud = { directory = "{{PROJECT}}/example-thundercloud", on-incoming = "Update", features = ["glass", "bash_config", "kermie"], invar-defaults = { props = { marthter = "Jeremy", buyer = "Myra LeJean", milk-man = "Kaos" } } }
             '''
 
             [yeth-marthter.example.invar.workshop]
@@ -908,6 +919,10 @@ mod test {
               - "expectations"
             # ==== END FRAGMENT glass-spring ====
             '''
+            "x_x_x+config-kermie.toml" = '''
+            [props]
+            sweeper = "Lao Tse"
+            '''
 
             [yeth-marthter.example.invar.workshop.bench]
             "press+option-free" = """
@@ -915,6 +930,7 @@ mod test {
 
             echo 'Hello, world!'
             """
+
         "#};
         trace!("TOML: [[[\n{}\n]]]", &toml_data);
         Ok(fixture::from_toml(toml_data)?)

@@ -5,7 +5,7 @@ use regex::Regex;
 use toml::{Table, Value};
 
 static PLACEHOLDER_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new("[{][{]([A-Za-z][A-Za-z0-9_]*)[}][}]").unwrap()
+    Regex::new("[{][{]([A-Za-z][-A-Za-z0-9_.]*)[}][}]").unwrap()
 });
 
 pub fn interpolate<'a>(source: &'a str, variables: &Table) -> Cow<'a, str> {

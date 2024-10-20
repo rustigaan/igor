@@ -3,6 +3,7 @@ igor-settings = "settings"
 
 [[psychotropic.cues]]
 name = "profile"
+"use-thundercloud" = { directory = "{{PROJECT}}/niches/profile/local" }
 
 [[psychotropic.cues]]
 name = "project-settings"
@@ -13,3 +14,4 @@ name = "#main"
 
 [[psychotropic.cues]]
 name = "example"
+use-thundercloud = { directory = "{{PROJECT}}/example-thundercloud", on-incoming = "Update", features = ["glass", "bash_config", "kermie"], invar-defaults = { props = { marthter = "Jeremy", buyer = "Myra LeJean", milk-man = "Kaos" } } }

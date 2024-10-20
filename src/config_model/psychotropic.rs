@@ -7,7 +7,7 @@ use super::psychotropic_data::{empty, PsychotropicConfigIndex};
 use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem, PathType};
 use crate::path::AbsolutePath;
 
-pub trait NicheTriggers: Debug {
+pub trait NicheTriggers: Clone + Debug {
     fn name(&self) -> String;
     fn use_thundercloud(&self) -> Option<&impl UseThundercloudConfig>;
     fn wait_for(&self) -> &[String];

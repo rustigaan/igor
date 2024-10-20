@@ -3,7 +3,7 @@ use crate::config_model::{InvarConfig, UseThundercloudConfig};
 use crate::file_system::{DirEntry,FileSystem};
 use crate::path::AbsolutePath;
 
-pub trait ThunderConfig : Debug + Send + Sync {
+pub trait ThunderConfig : Clone + Debug + Send + Sync {
     fn use_thundercloud(&self) -> &impl UseThundercloudConfig;
     fn default_invar_config(&self) -> &impl InvarConfig;
     fn thundercloud_directory(&self) -> &AbsolutePath;

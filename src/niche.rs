@@ -71,7 +71,7 @@ mod test {
         let default_invar_config = invar_config::from_str("", TOML)?;
 
         // When
-        process_niche(project_root, niches_directory, niche, use_thundercloud.clone(), default_invar_config, fs.clone()).await?;
+        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), default_invar_config, fs.clone()).await?;
 
         // Then
         let source_file = fs.open_source(to_absolute_path("/workshop/clock.yaml")).await?;

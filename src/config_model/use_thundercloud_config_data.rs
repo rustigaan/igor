@@ -25,6 +25,7 @@ static EMPTY_VEC: Lazy<Vec<String>> = Lazy::new(Vec::new);
 impl UseThundercloudConfig for UseThundercloudConfigData {
     type InvarConfigImpl = InvarConfigData;
     type GitRemoteConfigImpl = GitRemoteConfigData;
+
     fn directory(&self) -> Option<&str> {
         self.directory.as_ref().map(String::as_ref)
     }

@@ -4,7 +4,7 @@ use super::{InvarConfig, ThunderConfig, UseThundercloudConfig};
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
 use crate::path::AbsolutePath;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ThunderConfigData<TFS: FileSystem, PFS: FileSystem> {
     use_thundercloud: UseThundercloudConfigData,
     default_invar_config: InvarConfigData,
