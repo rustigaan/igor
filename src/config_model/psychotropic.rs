@@ -2,12 +2,14 @@ use std::fmt::Debug;
 use ahash::AHashSet;
 use anyhow::Result;
 use log::debug;
+use crate::config_model::UseThundercloudConfig;
 use super::psychotropic_data::{empty, PsychotropicConfigIndex};
 use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem, PathType};
 use crate::path::AbsolutePath;
 
 pub trait NicheTriggers: Debug {
     fn name(&self) -> String;
+    fn use_thundercloud(&self) -> Option<&impl UseThundercloudConfig>;
     fn wait_for(&self) -> &[String];
     fn triggers(&self) -> &[String];
 }

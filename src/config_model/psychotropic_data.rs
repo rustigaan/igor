@@ -3,6 +3,8 @@ use anyhow::{anyhow, Result};
 use ahash::{AHashMap, AHashSet};
 use log::debug;
 use serde::{Deserialize, Serialize};
+use crate::config_model::use_thundercloud_config_data::UseThundercloudConfigData;
+use crate::config_model::UseThundercloudConfig;
 use crate::file_system::ConfigFormat;
 use super::psychotropic::{NicheTriggers, PsychotropicConfig};
 
@@ -10,6 +12,7 @@ use super::psychotropic::{NicheTriggers, PsychotropicConfig};
 #[serde(rename_all = "kebab-case")]
 pub struct NicheCueData {
     name: String,
+    use_thundercloud: Option<UseThundercloudConfigData>,
     #[serde(default)]
     wait_for: Vec<String>,
 }
@@ -38,6 +41,10 @@ pub struct NicheTriggersData {
 impl NicheTriggers for NicheTriggersData {
     fn name(&self) -> String {
         self.niche_cue.name()
+    }
+
+    fn use_thundercloud(&self) -> Option<&impl UseThundercloudConfig> {
+        self.niche_cue.use_thundercloud.as_ref()
     }
 
     fn wait_for(&self) -> &[String] {
@@ -139,7 +146,7 @@ pub fn data_to_index(data: &PsychotropicConfigData) -> Result<PsychotropicConfig
                 let previous_barrier_name = name.clone();
                 let mut wait_for = Vec::new();
                 swap(&mut wait_for, &mut current_barrier_wait_for);
-                let barrier_cue = NicheCueData { name, wait_for };
+                let barrier_cue = NicheCueData { name, wait_for, use_thundercloud: None };
                 index.insert(previous_barrier_name, NicheTriggersData::new(barrier_cue));
             } else {
                 current_barrier = cue_name.clone();
@@ -163,7 +170,7 @@ pub fn data_to_index(data: &PsychotropicConfigData) -> Result<PsychotropicConfig
             if let Some(niche_trigger) = index.get_mut(dep) {
                 niche_trigger.triggers.push(cue.name())
             } else {
-                let trivial = NicheCueData { name: dep.clone(), wait_for: Vec::new() };
+                let trivial = NicheCueData { name: dep.clone(), wait_for: Vec::new(), use_thundercloud: None };
                 let mut niche_trigger = NicheTriggersData::new(trivial);
                 niche_trigger.triggers.push(cue.name());
                 index.insert(dep.clone(), niche_trigger);
