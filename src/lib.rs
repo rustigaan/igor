@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use ahash::AHashMap;
@@ -7,7 +5,6 @@ use anyhow::Result;
 use clap::Parser;
 use log::{debug, error, info, warn};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio_stream::StreamExt;
 
 mod config_model;
 mod file_system;
@@ -16,9 +13,8 @@ mod niche;
 mod path;
 mod thundercloud;
 
-use crate::config_model::project_config;
-use crate::config_model::psychotropic::{NicheTriggers,PsychotropicConfig};
-use crate::file_system::{source_file_to_string, ConfigFormat, DirEntry, FileSystem, PathType};
+use crate::config_model::{project_config,NicheTriggers,PsychotropicConfig};
+use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem, PathType};
 use crate::niche::process_niche;
 use crate::path::AbsolutePath;
 use crate::config_model::project_config::ProjectConfig;
@@ -50,6 +46,7 @@ impl NicheName {
     fn new<S: Into<String>>(name: S) -> Self {
         NicheName(name.into())
     }
+    #[allow(dead_code)]
     fn to_string(&self) -> String {
         self.0.clone()
     }
@@ -236,14 +233,6 @@ where PC: ProjectConfig
         }
     }
     Ok(count)
-}
-
-fn niche_name(niche: &AbsolutePath) -> String {
-    niche.file_name().map(OsStr::to_string_lossy).map_or_else(String::new, Cow::into_owned)
-}
-
-fn niche_path<S: Into<String>>(name: S, niches_directory: &AbsolutePath) -> AbsolutePath {
-    AbsolutePath::new(PathBuf::from(name.into()), niches_directory)
 }
 
 async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: NicheName, niche_fs: FS, project_config: Arc<PC>, tx_done: Sender<NicheName>) -> Result<()> {

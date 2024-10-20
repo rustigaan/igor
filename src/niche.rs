@@ -1,8 +1,8 @@
 use anyhow::Result;
 use log::{debug, info};
 use toml::{Table, Value};
-use crate::config_model::{niche_config, InvarConfig, NicheConfig, NicheTriggers, UseThundercloudConfig};
-use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem};
+use crate::config_model::{InvarConfig, UseThundercloudConfig};
+use crate::file_system::FileSystem;
 use crate::{interpolate, NicheName};
 use crate::thundercloud;
 use crate::path::{AbsolutePath, RelativePath};
@@ -41,27 +41,13 @@ pub async fn process_niche<UT: UseThundercloudConfig, FS: FileSystem, IC: InvarC
     Ok(())
 }
 
-async fn get_config<FS: FileSystem>(niche_directory: &AbsolutePath, settings_base: String, fs: &FS) -> Result<impl NicheConfig> {
-    let config_path = AbsolutePath::new(settings_base + ".toml", niche_directory);
-    info!("Config path: {config_path:?}");
-
-    let source_file = fs.open_source(config_path).await?;
-    let body = source_file_to_string(source_file).await?;
-    let config = niche_config::from_str(&body, ConfigFormat::TOML)?;
-    debug!("Niche configuration: {config:?}");
-    let use_thundercloud = config.use_thundercloud();
-    debug!("Niche simplified: {:?}: {:?}", use_thundercloud.on_incoming(), use_thundercloud.features());
-    Ok(config)
-}
-
 #[cfg(test)]
 mod test {
     use indoc::indoc;
     use log::trace;
     use test_log::test;
-    use tokio_stream::StreamExt;
-    use crate::config_model::{invar_config, project_config, ProjectConfig, PsychotropicConfig};
-    use crate::file_system::{fixture, FileSystem};
+    use crate::config_model::{invar_config, project_config, NicheTriggers, ProjectConfig, PsychotropicConfig};
+    use crate::file_system::{fixture, source_file_to_string, FileSystem};
     use crate::file_system::ConfigFormat::TOML;
     use crate::path::test_utils::to_absolute_path;
     use super::*;

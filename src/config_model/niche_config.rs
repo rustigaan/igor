@@ -1,8 +1,8 @@
 use super::niche_config_data::NicheConfigData;
 
 use std::fmt::Debug;
-use crate::config_model::{ThunderConfig, UseThundercloudConfig};
-use crate::file_system::{ConfigFormat, FileSystem};
+use crate::config_model::UseThundercloudConfig;
+use crate::file_system::ConfigFormat;
 
 pub trait NicheConfig : Sized + Debug {
     fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self>;
@@ -24,9 +24,6 @@ pub mod test {
     use log::debug;
     use test_log::test;
     use toml::Table;
-    use crate::config_model::invar_config;
-    use crate::file_system::ConfigFormat::TOML;
-    use crate::file_system::fixture;
 
     #[test]
     pub fn test_from_reader() -> Result<()> {

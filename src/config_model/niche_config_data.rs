@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use crate::file_system::ConfigFormat;
-use super::{UseThundercloudConfig, NicheConfig, InvarConfig};
+use super::{UseThundercloudConfig, NicheConfig};
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
 
 #[derive(Deserialize,Serialize,Debug)]
