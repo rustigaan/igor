@@ -47,9 +47,10 @@ pub mod test {
             directory = "{{PROJECT}}/example-thundercloud"
         "#};
         let use_thundercloud_config: UseThundercloudConfigData = toml::from_str(toml_source)?;
-        let thunder_cloud_dir = AbsolutePath::try_from("/tmp")?;
-        let invar_dir = AbsolutePath::try_from("/var/tmp")?;
-        let project_root = AbsolutePath::try_from("/")?;
+        let root = AbsolutePath::root();
+        let thunder_cloud_dir = AbsolutePath::new("/tmp", &root);
+        let project_root = root;
+        let invar_dir = AbsolutePath::new("/var/tmp", &project_root);
         let cumulus = AbsolutePath::new("cumulus", &thunder_cloud_dir);
         let fs = fixture::from_toml("")?;
         let default_invar_config = invar_config::from_str("", TOML)?;

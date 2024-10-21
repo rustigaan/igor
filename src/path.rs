@@ -14,6 +14,10 @@ pub struct RelativePath(PathBuf);
 pub struct SingleComponent(PathBuf);
 
 impl AbsolutePath {
+    pub fn root() -> Self {
+        AbsolutePath("/".into())
+    }
+
     pub fn new<PB: Into<PathBuf>>(path: PB, reference: &AbsolutePath) -> Self {
         let path = path.into();
         if path.is_absolute() {
@@ -178,11 +182,10 @@ fn get_path_prefix(path: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 pub mod test_utils {
-    use std::path::PathBuf;
     use crate::path::AbsolutePath;
 
     pub fn to_absolute_path<S: Into<String>>(path: S) -> AbsolutePath {
-        let root = AbsolutePath::try_new(PathBuf::from("/")).unwrap();
+        let root = AbsolutePath::root();
         AbsolutePath::new(path.into(), &root)
     }
 }

@@ -2,14 +2,17 @@ use std::fmt::Debug;
 use ahash::AHashSet;
 use anyhow::Result;
 use log::debug;
+use serde::Deserialize;
 use crate::config_model::UseThundercloudConfig;
 use super::psychotropic_data::{empty, PsychotropicConfigIndex};
-use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem, PathType};
+use crate::file_system::{ConfigFormat, FileSystem, PathType};
 use crate::path::AbsolutePath;
 
 pub trait NicheTriggers: Clone + Debug {
+    type UseThundercloudConfigImpl: UseThundercloudConfig + for<'a> Deserialize<'a>;
     fn name(&self) -> String;
-    fn use_thundercloud(&self) -> Option<&impl UseThundercloudConfig>;
+    fn use_thundercloud(&self) -> Option<&Self::UseThundercloudConfigImpl>;
+    fn use_thundercloud_path(&self) -> Option<AbsolutePath>;
     fn wait_for(&self) -> &[String];
     fn triggers(&self) -> &[String];
 }
@@ -33,9 +36,8 @@ pub async fn from_path<FS: FileSystem>(source_path: &AbsolutePath, config_format
         debug!("Source path is not a file: {:?}: {:?}", source_path, source_path_type);
         return Ok(empty())
     }
-    let source_file = file_system.open_source(source_path.clone()).await?;
-    let body = source_file_to_string(source_file).await?;
-    PsychotropicConfigIndex::from_str(&body, config_format)
+    let content = file_system.get_content(source_path.clone()).await?;
+    PsychotropicConfigIndex::from_str(&content, config_format)
 }
 
 #[cfg(test)]

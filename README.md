@@ -8,11 +8,11 @@ Every Igor has had (and has executed) many surgeries, has many visible scars and
 
 This vendoring tool is similar. It offers inversion-of-control in vendoring dependencies. What is that supposed to mean, you might ask. Well, in a nutshell it works like this:
 
-1. A project declares the niches it wants to be served by an Igor in a directory named `yeth-marthter` (the strange spelling is caused by the lisp). For each niche there is a subdirectory with a name that matches the name of the niche that contains at least a file named `igor-thettingth.toml` that specifies the name of the thundercloud project that provides lightning for this niche. File `igor-thettingth.toml` can also be used to turn features on and off and otherwise change the process. The niche directory may contain additional files that complement or override files and fragments that are injected by Igor.
+1. A project declares the niches it wants to be served by an Igor in a file named `CargoCult.toml`. The file `CargoCult.toml` has an array of tables `[[psychotropic.cues]]`. Each table in this array specifies a niche by providing a name and a `use-thundercloud` configuration. A `use-thundercloud` configuration can be either a path to a TOML file or a table. The use-thundercloud configuration specifies where the lightning comes from and how to process it. The niche directory `yeth-marthter/nicheName/invar` may contain additional files that complement or override files and fragments that are injected by Igor.
 
 2. Igor watches thundercloud projects that provide lightning: files and fragments of files that can be injected into projects of marthters.
 
-3. When files change in thundercloud projects, Igor updates all the projects that declare the corresponding niche (unless opted out in `yeth-marthter/nicheName/igor-thettingth.toml`). If the settings file declares a build command, that is also run after the bolt of lightning hit the niche.
+3. When files change in thundercloud projects, Igor updates all the projects that declare the corresponding niche (unless opted out). If the settings file declares a build command, that is also run after the bolt of lightning hit the niche.
 
 It is also possible to have Igor apply selected thundercloud projects to a marthterth' project.
 
@@ -50,14 +50,11 @@ The top-level config file is `CargoCult.toml` in the root of the project. It is 
 
 Property `niches-directory` of `CargoCult.toml` specifies the directory (relative to the project root) that contains all niches that specify how thunderclouds should power the project. The default value of `niches-directory` is `yeth-marthter`.
 
-Property `igor-settings` specifies the base name of the configuration file of each niche. The default value of `igor-settings` is `igor-thettingth`.
-
 The `CargoCult.toml` can also be used that some niches need to wait for other niches to complete first. This is similar to the [psychotropic](#psychotropic) behavior of the weather in Überwald.
 
 This is an example of a complete `CargoCult.toml`:
 ```toml
 niches-directory = "niches"
-igor-settings = "settings"
 
 [psychotropic]
 
@@ -143,30 +140,41 @@ Examples of lightning files:
 * `Cargo-fragment+tokio-build_deps.toml` replaces placeholder `build_deps` in `Cargo.toml` if feature `tokio` is selected
 * `main-ignore+niche.rs` ignores all lightning instructions from this niche for `main.rs`
 
-Minimal settings file `yeth-marthter/async-rust/igor-thettingth.toml`:
+Minimal `CargoCult.toml`:
 ```toml
-[thundercloud]
-directory = "{{WORKAREA}}/async-rust-igor-thundercloud"
+[[psychotropic.cues]]
+name = "example"
+use-thundercloud = { directory = "{{WORKAREA}}/async-rust-igor-thundercloud" }
 ```
 
-Elaborate settings file `yeth-marthter/dendrite/igor-thettingth.toml`
+Elaborate `CargoCult.toml`:
 ```toml
-[type]
-name = "igor"
-version = "v0.1.0"
+[[psychotropic.cues]]
+name = "example"
+use-thundercloud = "yeth-marthter/example/igor-thettingth.toml"
 
-[thundercloud.git]
-remote = "git@github.com:rustigaan/dendrite-igor-thundercloud.git"
+[invar-defaults]
+write-mode = "Overwrite"
+interpolate = false
+```
+
+With an external `use-thundercloud` configuration `yeth-marthter/example/igor-thettingth.toml`:
+```toml
+git-remote = "git@github.com:rustigaan/dendrite-igor-thundercloud.git"
 revision = "master"
 on-incoming = "warn" # update | ignore | warn | fail
 
-[options]
-selected = [
+features = [
   "mongodb", # For query models that store data in MongoDB
   "grpc_ui" # For an extra container that provides a web User Interface to call the gRPC backend
 ]
 deselected = [ "frontend" ]
 
-[settings]
-watch = false
+[invar-defaults]
+# These defaults override the project-wide defaults
+write-mode = "WriteNew" # Don't override existing files
+interpolate = true # Interpolate occurrences of {{placeholder}}
+
+[invar-defaults.props]
+placeholder = "replacement"
 ```

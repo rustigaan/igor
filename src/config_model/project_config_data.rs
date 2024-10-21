@@ -14,7 +14,6 @@ use crate::path::RelativePath;
 #[serde(rename_all = "kebab-case")]
 pub struct ProjectConfigData {
     niches_directory: Option<String>,
-    igor_settings: Option<String>,
     psychotropic: Option<PsychotropicConfigData>,
     invar_defaults: Option<InvarConfigData>,
 }
@@ -38,14 +37,6 @@ impl ProjectConfig for ProjectConfigData {
             RelativePath::from((*dir).clone())
         } else {
             RelativePath::from("yeth-marthter")
-        }
-    }
-
-    fn igor_settings(&self) -> String {
-        if let Some(base) = &self.igor_settings {
-            base.clone()
-        } else {
-            "igor-thettingth".to_string()
         }
     }
 

@@ -420,8 +420,8 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 let project_fs = self.0.project_file_system();
                 debug!("Bolt context: {:?}", bolt.context());
                 let bolt_invar_config_body = match bolt.context() {
-                    ThunderCloud => get_invar_config_body(bolt.source(), &thundercloud_fs).await?,
-                    Project => get_invar_config_body(bolt.source(), &project_fs).await?,
+                    ThunderCloud => thundercloud_fs.get_content(bolt.source().clone()).await?,
+                    Project => project_fs.get_content(bolt.source().clone()).await?,
                 };
                 let bolt_invar_config = get_invar_config(&bolt_invar_config_body, format)?;
                 debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
@@ -626,13 +626,6 @@ fn interpolate<IC: InvarConfig>(line: &str, invar_config: &IC) -> String {
 
 fn void_subtree() -> (AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>) {
     (AHashMap::new(), AHashSet::new())
-}
-
-async fn get_invar_config_body<FS: FileSystem>(source: &AbsolutePath, fs: &FS) -> Result<String> {
-    info!("Config path: {source:?}");
-
-    let source_file = fs.open_source(source.clone()).await?;
-    source_file_to_string(source_file).await
 }
 
 fn get_invar_config(body: &str, config_format: ConfigFormat) -> Result<impl InvarConfig> {
@@ -905,7 +898,7 @@ mod test {
         let project_config = create_project_config(project_fs.clone()).await?;
         let niche_triggers = get_niche_triggers(&project_config)?;
         let default_invar_config = niche_triggers.use_thundercloud().unwrap().invar_defaults().into_owned();
-        let project_root = to_absolute_path("/");
+        let project_root = AbsolutePath::root();
         let thundercloud_directory = to_absolute_path("/example-thundercloud");
         let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
         let thunder_config = niche_triggers.use_thundercloud().unwrap().new_thunder_config(default_invar_config, thundercloud_fs.clone(), thundercloud_directory.clone(), project_fs.clone(), invar_directory.clone(), project_root.clone());
@@ -919,10 +912,7 @@ mod test {
 
         let fs = generation_context.0.project_file_system();
 
-        let source_file = fs.open_source(result_file_path).await?;
-        let body = source_file_to_string(source_file).await?;
-
-        Ok(body)
+        fs.get_content(result_file_path).await
     }
 
     async fn create_project_config<FS: FileSystem>(fs: FS) -> Result<impl ProjectConfig> {

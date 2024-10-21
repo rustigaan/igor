@@ -4,15 +4,22 @@ use ahash::{AHashMap, AHashSet};
 use log::debug;
 use serde::{Deserialize, Serialize};
 use crate::config_model::use_thundercloud_config_data::UseThundercloudConfigData;
-use crate::config_model::UseThundercloudConfig;
 use crate::file_system::ConfigFormat;
+use crate::path::AbsolutePath;
 use super::psychotropic::{NicheTriggers, PsychotropicConfig};
+
+#[derive(Deserialize,Serialize,Debug,Clone)]
+#[serde(untagged)]
+enum UseThundercloudSpec {
+    ProjectPath(String),
+    Inline(UseThundercloudConfigData),
+}
 
 #[derive(Deserialize,Serialize,Debug,Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct NicheCueData {
     name: String,
-    use_thundercloud: Option<UseThundercloudConfigData>,
+    use_thundercloud: Option<UseThundercloudSpec>,
     #[serde(default)]
     wait_for: Vec<String>,
 }
@@ -39,12 +46,27 @@ pub struct NicheTriggersData {
 }
 
 impl NicheTriggers for NicheTriggersData {
+    type UseThundercloudConfigImpl = UseThundercloudConfigData;
+
     fn name(&self) -> String {
         self.niche_cue.name()
     }
 
-    fn use_thundercloud(&self) -> Option<&impl UseThundercloudConfig> {
-        self.niche_cue.use_thundercloud.as_ref()
+    fn use_thundercloud(&self) -> Option<&Self::UseThundercloudConfigImpl> {
+        match &self.niche_cue.use_thundercloud {
+            Some(UseThundercloudSpec::Inline(use_thundercloud)) => Some(use_thundercloud),
+            _ => None
+        }
+    }
+
+    fn use_thundercloud_path(&self) -> Option<AbsolutePath> {
+        match &self.niche_cue.use_thundercloud {
+            Some(UseThundercloudSpec::ProjectPath(path)) => {
+                let root = AbsolutePath::root();
+                Some(AbsolutePath::new(path, &root))
+            }
+            _ => None
+        }
     }
 
     fn wait_for(&self) -> &[String] {

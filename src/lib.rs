@@ -13,8 +13,8 @@ mod niche;
 mod path;
 mod thundercloud;
 
-use crate::config_model::{project_config,NicheTriggers,PsychotropicConfig};
-use crate::file_system::{source_file_to_string, ConfigFormat, FileSystem, PathType};
+use crate::config_model::{project_config, NicheTriggers, PsychotropicConfig};
+use crate::file_system::{ConfigFormat, FileSystem, PathType};
 use crate::niche::process_niche;
 use crate::path::AbsolutePath;
 use crate::config_model::project_config::ProjectConfig;
@@ -67,8 +67,7 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
 
     let project_config_path = AbsolutePath::new("CargoCult.toml", &project_root);
     let project_config_data = if fs.path_type(&project_config_path).await == PathType::File {
-        let source_file = fs.open_source(project_config_path).await?;
-        source_file_to_string(source_file).await?
+        fs.get_content(project_config_path).await?
     } else {
         "".to_string()
     };
@@ -238,9 +237,18 @@ where PC: ProjectConfig
 async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: NicheName, niche_fs: FS, project_config: Arc<PC>, tx_done: Sender<NicheName>) -> Result<()> {
     debug!("Processing niche: {:?}", &niche);
     let psychotropic = project_config.psychotropic()?;
-    let use_thundercloud_option = psychotropic
-        .get(niche.to_str())
-        .map(NicheTriggers::use_thundercloud).flatten();
+    let niche_triggers = psychotropic
+        .get(niche.to_str());
+    let use_thundercloud_inline_option = niche_triggers
+        .map(NicheTriggers::use_thundercloud).flatten().map(Clone::clone);
+    let use_thundercloud_option = if use_thundercloud_inline_option.is_some() {
+        use_thundercloud_inline_option
+    } else if let Some(path) = niche_triggers.map(NicheTriggers::use_thundercloud_path).flatten() {
+        let content = niche_fs.get_content(path).await?;
+        Some(toml::from_str(&content)?)
+    } else {
+        None
+    };
     let result = if let Some(use_thundercloud) = use_thundercloud_option {
         let niches_directory = project_config.niches_directory();
         process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), project_config.invar_defaults().into_owned(), niche_fs).await
@@ -259,7 +267,7 @@ mod test {
     use indoc::indoc;
     use log::trace;
     use test_log::test;
-    use crate::file_system::{fixture, source_file_to_string, FileSystem};
+    use crate::file_system::{fixture, FileSystem};
     use crate::path::test_utils::to_absolute_path;
     use super::*;
 
@@ -272,15 +280,14 @@ mod test {
         application(Some(PathBuf::from("/")), &fs).await?;
 
         // Then
-        let source_file = fs.open_source(to_absolute_path("/workshop/clock.yaml")).await?;
-        let body = source_file_to_string(source_file).await?;
+        let content = fs.get_content(to_absolute_path("/workshop/clock.yaml")).await?;
         let expected = indoc! {r#"
             ---
             raising:
               - "steam"
               - "money"
         "#};
-        assert_eq!(&body, expected);
+        assert_eq!(&content, expected);
 
         Ok(())
     }
@@ -289,7 +296,6 @@ mod test {
         let toml_data = indoc! {r#"
             "CargoCult.toml" = '''
             niches-directory = "yeth-marthter"
-            igor_thettingth = "igor-thettingth"
 
             [psychotropic]
 
@@ -298,10 +304,7 @@ mod test {
 
             [[psychotropic.cues]]
             name = "example"
-
-            [psychotropic.cues.use-thundercloud]
-            directory = "{{PROJECT}}/example-thundercloud"
-            features = ["glass"]
+            use-thundercloud = "/yeth-marthter/example/use-thundercloud.toml"
 
             [[psychotropic.cues]]
             name = "non-existent"
@@ -311,6 +314,10 @@ mod test {
             [yeth-marthter]
 
             [yeth-marthter.example]
+            "use-thundercloud.toml" = '''
+            directory = "{{PROJECT}}/example-thundercloud"
+            features = ["glass"]
+            '''
 
             [yeth-marthter.example.invar.workshop]
             "clock+config-glass.yaml.toml" = """

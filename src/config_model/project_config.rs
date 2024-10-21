@@ -11,7 +11,6 @@ pub trait ProjectConfig: Debug + Sized {
     type InvarConfigImpl : InvarConfig;
     fn from_str(toml_data: &str, config_format: ConfigFormat) -> anyhow::Result<Self>;
     fn niches_directory(&self) -> RelativePath;
-    fn igor_settings(&self) -> String;
     fn psychotropic(&self) -> Result<impl PsychotropicConfig>;
     fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
 }

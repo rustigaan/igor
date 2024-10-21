@@ -294,7 +294,7 @@ impl<'de> Deserialize<'de> for FixtureDirectory {
 
 impl From<FixtureEnum> for FixtureFileSystem {
     fn from(value: FixtureEnum) -> Self {
-        let root = AbsolutePath::try_new(PathBuf::from("/")).unwrap();
+        let root = AbsolutePath::root();
         let root_entry = convert_enum(&root, &"/", Box::new(value));
         FixtureFileSystem { data: Arc::new(root_entry) }
     }
@@ -386,7 +386,7 @@ mod test {
     async fn open_source() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
-        let root = AbsolutePath::try_new(PathBuf::from("/"))?;
+        let root = AbsolutePath::root();
 
         // When
         let mut source_file = fs.open_source(AbsolutePath::new("top-dir/sub-dir/file", &root)).await?;
@@ -423,7 +423,7 @@ mod test {
     async fn open_source_root() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
-        let root = to_absolute_path("/");
+        let root = AbsolutePath::root();
 
         // When
         let result = fs.open_source(root).await;
@@ -538,7 +538,7 @@ mod test {
     async fn open_target_root_ignore() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
-        let root = to_absolute_path("/");
+        let root = AbsolutePath::root();
 
         // When
         let target_option = fs.open_target(root, Ignore).await?;
@@ -553,7 +553,7 @@ mod test {
     async fn open_missing_target_file_name() -> Result<()> {
         // Given
         let fs = create_test_fixture_file_system()?;
-        let root = to_absolute_path("/");
+        let root = AbsolutePath::root();
         debug!("File name of root: {:?}", root.file_name());
         assert!(root.file_name().is_none());
 

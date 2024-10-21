@@ -47,7 +47,7 @@ mod test {
     use log::trace;
     use test_log::test;
     use crate::config_model::{invar_config, project_config, NicheTriggers, ProjectConfig, PsychotropicConfig};
-    use crate::file_system::{fixture, source_file_to_string, FileSystem};
+    use crate::file_system::{fixture, FileSystem};
     use crate::file_system::ConfigFormat::TOML;
     use crate::path::test_utils::to_absolute_path;
     use super::*;
@@ -57,9 +57,8 @@ mod test {
         // Given
         let fs = create_file_system_fixture()?;
 
-        let project_root = to_absolute_path("/");
-        let cargo_cult_toml = fs.open_source(AbsolutePath::new("CargoCult.toml", &project_root)).await?;
-        let cargo_cult_toml_data = source_file_to_string(cargo_cult_toml).await?;
+        let project_root = AbsolutePath::root();
+        let cargo_cult_toml_data = fs.get_content(AbsolutePath::new("CargoCult.toml", &project_root)).await?;
         let project_config = project_config::from_str(&cargo_cult_toml_data, TOML)?;
         let niche = NicheName::new("example");
         let psychotropic = project_config.psychotropic()?;
@@ -74,15 +73,14 @@ mod test {
         process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), default_invar_config, fs.clone()).await?;
 
         // Then
-        let source_file = fs.open_source(to_absolute_path("/workshop/clock.yaml")).await?;
-        let body = source_file_to_string(source_file).await?;
+        let content = fs.get_content(to_absolute_path("/workshop/clock.yaml")).await?;
         let expected = indoc! {r#"
             ---
             raising:
               - "steam"
               - "money"
         "#};
-        assert_eq!(&body, expected);
+        assert_eq!(&content, expected);
 
         Ok(())
     }

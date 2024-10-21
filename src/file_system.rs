@@ -44,6 +44,12 @@ pub trait FileSystem: Debug + Send + Sync + Sized + Clone {
     fn path_type(&self, path: &AbsolutePath) -> impl Future<Output = PathType> + Send;
     fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> impl Future<Output = Result<Option<impl TargetFile>>> + Send;
     fn open_source(&self, file_path: AbsolutePath) -> impl Future<Output = Result<impl SourceFile>> + Send;
+    fn get_content(&self, file_path: AbsolutePath) -> impl Future<Output = Result<String>> + Send {
+        async {
+            let source_file = self.open_source(file_path).await?;
+            source_file_to_string(source_file).await
+        }
+    }
     fn read_only(self) -> impl FileSystem {
         ReadOnlyFileSystem(self)
     }
