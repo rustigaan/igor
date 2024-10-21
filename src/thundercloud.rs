@@ -753,89 +753,9 @@ mod test {
     use super::*;
 
     #[test(tokio::test)]
-    async fn test_process_niche() -> Result<()> {
+    async fn test_process_complex_niche() -> Result<()> {
         // Given
-        let thundercloud_fs = create_thundercloud_file_system_fixture()?.read_only();
-        let project_fs = create_project_file_system_fixture()?;
-        let project_config = create_project_config(project_fs.clone()).await?;
-        let niche_triggers = get_niche_triggers(&project_config)?;
-        let default_invar_config = niche_triggers.use_thundercloud().unwrap().invar_defaults().into_owned();
-        let project_root = to_absolute_path("/");
-        let thundercloud_directory = to_absolute_path("/example-thundercloud");
-        let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
-        let thunder_config = niche_triggers.use_thundercloud().unwrap().new_thunder_config(default_invar_config, thundercloud_fs.clone(), thundercloud_directory.clone(), project_fs.clone(), invar_directory.clone(), project_root.clone());
-        let generation_context = GenerationContext(thunder_config);
-
-        // When
-        let result = process_niche_in_context(&generation_context).await;
-
-        // Then
-        result?;
-
-        let fs = generation_context.0.project_file_system();
-
-        let source_path = to_absolute_path("/workshop/clock.yaml");
-        let source_file = fs.open_source(source_path).await?;
-        let body = source_file_to_string(source_file).await?;
-
-        let yaml = indoc! {r#"
-            ---
-            sweeper: "Lobsang"
-            raising:
-              - "steam"
-              - "money"
-            # ==== BEGIN FRAGMENT glass-spring ====
-            ---
-            spring:
-              material: glass
-              delicate: true
-              number-of-coils: 17
-            raising:
-              - "expectations"
-            # ==== END FRAGMENT glass-spring ====
-              - "to the occasion"
-        "#};
-
-        assert_eq!(body, yaml);
-
-        let kermie_source_path = to_absolute_path("/workshop/x_x");
-        let kermie_source_file = fs.open_source(kermie_source_path).await?;
-        let kermie_body = source_file_to_string(kermie_source_file).await?;
-
-        let kermie_yaml = indoc! {r#"
-            Miss Piggy
-            Sweeper: Lao Tse
-        "#};
-
-        assert_eq!(kermie_body, kermie_yaml);
-
-        Ok(())
-    }
-
-    async fn create_project_config<FS: FileSystem>(fs: FS) -> Result<impl ProjectConfig> {
-        let source_file = fs.open_source(to_absolute_path("/CargoCult.toml")).await?;
-        let body = body(source_file).await?;
-        Ok(project_config::from_str(&body, TOML)?)
-    }
-
-    fn get_niche_triggers<PC: ProjectConfig>(project_config: &PC) -> Result<impl NicheTriggers + '_> {
-        let psychotropic_config = project_config.psychotropic()?;
-        let niche_triggers = psychotropic_config.get("example");
-        niche_triggers.map(|nt| nt.clone()).ok_or_else(|| anyhow!("Niche not found: 'example'"))
-    }
-
-    // Utilities
-
-    async fn body<SF: SourceFile>(mut source_file: SF) -> Result<String> {
-        let mut body = Vec::new();
-        while let Some(line) = source_file.next_line().await? {
-            body.push(line);
-        }
-        Ok(body.join("\n"))
-    }
-
-    fn create_thundercloud_file_system_fixture() -> Result<impl FileSystem> {
-        let toml_data = indoc! {r#"
+        let thundercloud_toml = indoc! {r#"
             [example-thundercloud]
             "thundercloud.toml" = """
             [niche]
@@ -873,18 +793,8 @@ mod test {
             "clock+config-glass.yaml.toml" = """
             write-mode = "WriteNew"
             """
-            "x_x_x+option-kermie" = '''
-            Miss Piggy
-            Sweeper: {{sweeper}}
-            '''
         "#};
-        trace!("TOML: [[[\n{}\n]]]", &toml_data);
-
-        Ok(fixture::from_toml(toml_data)?)
-    }
-
-    fn create_project_file_system_fixture() -> Result<impl FileSystem> {
-        let toml_data = indoc! {r#"
+        let project_toml = indoc! {r#"
             "CargoCult.toml" = '''
             [[psychotropic.cues]]
             name = "example"
@@ -892,16 +802,6 @@ mod test {
             '''
 
             [yeth-marthter.example.invar.workshop]
-            "README+fragment-@-details.md" = """
-            ## Details
-
-            The details of this project.
-
-            * Marthter: {{marthter}}
-            * Buyer: {{buyer}}
-            * Milk man: {{milk-man}}
-            * Undefined: {{undefined}}
-            """
             "clock+config-glass.yaml.toml" = """
             write-mode = "Overwrite"
 
@@ -919,20 +819,131 @@ mod test {
               - "expectations"
             # ==== END FRAGMENT glass-spring ====
             '''
-            "x_x_x+config-kermie.toml" = '''
-            [props]
-            sweeper = "Lao Tse"
-            '''
+        "#};
 
-            [yeth-marthter.example.invar.workshop.bench]
-            "press+option-free" = """
-            #!/usr/bin/false
+        // When
+        let result_file_path = to_absolute_path("/workshop/clock.yaml");
+        let result_body = test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
 
-            echo 'Hello, world!'
+        // Then
+        let expected_result = indoc! {r#"
+            ---
+            sweeper: "Lobsang"
+            raising:
+              - "steam"
+              - "money"
+            # ==== BEGIN FRAGMENT glass-spring ====
+            ---
+            spring:
+              material: glass
+              delicate: true
+              number-of-coils: 17
+            raising:
+              - "expectations"
+            # ==== END FRAGMENT glass-spring ====
+              - "to the occasion"
+        "#};
+        assert_eq!(&result_body, expected_result);
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn test_config_without_extension() -> Result<()> {
+        // Given
+        let thundercloud_toml = indoc! {r#"
+            [example-thundercloud]
+            "thundercloud.toml" = """
+            [niche]
+            name = "example"
+            description = "Example thundercloud for demonstration purposes"
+
+            [invar-defaults.props]
+            alter-ego = "Lobsang"
             """
 
+            [example-thundercloud.cumulus.workshop]
+            "x_x_x+option-kermie" = '''
+            Miss Piggy
+            Sweeper: {{sweeper}}
+            Alter ego: {{alter-ego}}
+            '''
         "#};
-        trace!("TOML: [[[\n{}\n]]]", &toml_data);
-        Ok(fixture::from_toml(toml_data)?)
+        let project_toml = indoc! {r#"
+            "CargoCult.toml" = '''
+            [[psychotropic.cues]]
+            name = "example"
+            use-thundercloud = { directory = "{{PROJECT}}/example-thundercloud", on-incoming = "Update", features = ["glass", "bash_config", "kermie"], invar-defaults = { props = { marthter = "Jeremy", buyer = "Myra LeJean", milk-man = "Kaos" } } }
+            '''
+
+            [yeth-marthter.example.invar.workshop]
+            "x_x_x+config-kermie.toml" = '''
+            [props]
+            sweeper = "Lu Tse"
+            '''
+        "#};
+
+        // When
+        let result_file_path = to_absolute_path("/workshop/x_x");
+        let result_body = test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
+
+        // Then
+        let expected_result = indoc! {r#"
+            Miss Piggy
+            Sweeper: Lu Tse
+            Alter ego: Lobsang
+        "#};
+        assert_eq!(&result_body, expected_result);
+
+        Ok(())
+    }
+
+    async fn test_process_niche(thundercloud_toml: &str, project_toml: &str, result_file_path: AbsolutePath) -> Result<String> {
+        // Given
+        let thundercloud_fs = fixture::from_toml(thundercloud_toml)?;
+        let project_fs = fixture::from_toml(project_toml)?;
+        let project_config = create_project_config(project_fs.clone()).await?;
+        let niche_triggers = get_niche_triggers(&project_config)?;
+        let default_invar_config = niche_triggers.use_thundercloud().unwrap().invar_defaults().into_owned();
+        let project_root = to_absolute_path("/");
+        let thundercloud_directory = to_absolute_path("/example-thundercloud");
+        let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
+        let thunder_config = niche_triggers.use_thundercloud().unwrap().new_thunder_config(default_invar_config, thundercloud_fs.clone(), thundercloud_directory.clone(), project_fs.clone(), invar_directory.clone(), project_root.clone());
+        let generation_context = GenerationContext(thunder_config);
+
+        // When
+        let result = process_niche_in_context(&generation_context).await;
+
+        // Then
+        result?;
+
+        let fs = generation_context.0.project_file_system();
+
+        let source_file = fs.open_source(result_file_path).await?;
+        let body = source_file_to_string(source_file).await?;
+
+        Ok(body)
+    }
+
+    async fn create_project_config<FS: FileSystem>(fs: FS) -> Result<impl ProjectConfig> {
+        let source_file = fs.open_source(to_absolute_path("/CargoCult.toml")).await?;
+        let body = body(source_file).await?;
+        Ok(project_config::from_str(&body, TOML)?)
+    }
+
+    fn get_niche_triggers<PC: ProjectConfig>(project_config: &PC) -> Result<impl NicheTriggers + '_> {
+        let psychotropic_config = project_config.psychotropic()?;
+        let niche_triggers = psychotropic_config.get("example");
+        niche_triggers.map(|nt| nt.clone()).ok_or_else(|| anyhow!("Niche not found: 'example'"))
+    }
+
+    // Utilities
+
+    async fn body<SF: SourceFile>(mut source_file: SF) -> Result<String> {
+        let mut body = Vec::new();
+        while let Some(line) = source_file.next_line().await? {
+            body.push(line);
+        }
+        Ok(body.join("\n"))
     }
 }
