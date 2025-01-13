@@ -13,7 +13,7 @@ mod niche;
 mod path;
 mod thundercloud;
 
-use crate::config_model::{project_config, NicheTriggers, PsychotropicConfig};
+use crate::config_model::{project_config, NicheTriggers, PsychotropicConfig, UseThundercloudConfig};
 use crate::file_system::{ConfigFormat, FileSystem, PathType};
 use crate::niche::process_niche;
 use crate::path::AbsolutePath;
@@ -237,19 +237,7 @@ where PC: ProjectConfig
 async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: NicheName, niche_fs: FS, project_config: Arc<PC>, tx_done: Sender<NicheName>) -> Result<()> {
     debug!("Processing niche: {:?}", &niche);
     let psychotropic = project_config.psychotropic()?;
-    let niche_triggers = psychotropic
-        .get(niche.to_str());
-    let use_thundercloud_inline_option = niche_triggers
-        .map(NicheTriggers::use_thundercloud).flatten().map(Clone::clone);
-    let use_thundercloud_option = if use_thundercloud_inline_option.is_some() {
-        use_thundercloud_inline_option
-    } else if let Some(path) = niche_triggers.map(NicheTriggers::use_thundercloud_path).flatten() {
-        let content = niche_fs.get_content(path).await?;
-        Some(toml::from_str(&content)?)
-    } else {
-        None
-    };
-    let result = if let Some(use_thundercloud) = use_thundercloud_option {
+    let result = if let Some(use_thundercloud) = get_use_thundercloud_option(&niche, &niche_fs, &psychotropic).await? {
         let niches_directory = project_config.niches_directory();
         process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), project_config.invar_defaults().into_owned(), niche_fs).await
     } else {
@@ -260,6 +248,21 @@ async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: Abso
     tx_done.send(niche.clone()).await?;
     debug!("Done sent: {:?}", &niche);
     result
+}
+
+async fn get_use_thundercloud_option<FS: FileSystem, PC: PsychotropicConfig>(niche: &NicheName, niche_fs: &FS, psychotropic: &PC) -> Result<Option<impl UseThundercloudConfig>> {
+    let niche_triggers = psychotropic
+        .get(niche.to_str());
+    let use_thundercloud_inline_option = niche_triggers
+        .map(NicheTriggers::use_thundercloud).flatten().map(Clone::clone);
+    if use_thundercloud_inline_option.is_some() {
+        Ok(use_thundercloud_inline_option)
+    } else if let Some(path) = niche_triggers.map(NicheTriggers::use_thundercloud_path).flatten() {
+        let content = niche_fs.get_content(path).await?;
+        Ok(Some(toml::from_str(&content)?))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

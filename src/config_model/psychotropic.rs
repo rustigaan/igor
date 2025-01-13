@@ -17,7 +17,7 @@ pub trait NicheTriggers: Clone + Debug {
     fn triggers(&self) -> &[String];
 }
 
-pub trait PsychotropicConfig: Debug + Sized + Send {
+pub trait PsychotropicConfig: Debug + Sized + Send + Sync {
     type NicheTriggersImpl: NicheTriggers;
 
     fn independent(&self) -> AHashSet<String>;
