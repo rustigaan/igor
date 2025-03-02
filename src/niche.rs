@@ -1,6 +1,11 @@
-use anyhow::Result;
+use std::path::PathBuf;
+use anyhow::{anyhow, Result};
+use base16ct::encoded_len;
 use log::{debug, info};
+use sha2::{Digest, Sha256};
 use toml::{Table, Value};
+use tokio::process::Command;
+use tokio::fs::create_dir_all;
 use crate::config_model::{GitRemoteConfig, InvarConfig, UseThundercloudConfig};
 use crate::file_system::{real_file_system, FileSystem};
 use crate::{interpolate, NicheName};
@@ -77,16 +82,62 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(p
         let fetch_url = git_remote.fetch_url();
         info!("Fetch URL: {niche:?}: {fetch_url:?}");
         let mut path = target_dir.clone();
-        path.push(niche.to_str());
-        info!("Git directory: {niche:?}: {path:?}");
-        if thundercloud_fs.path_type(&path).await == Directory {
-            info!("TODO: Update repository [{fetch_url:?}] into [{path:?}]");
-            return Ok((Some(path), RealFs));
+        let dir = digest(fetch_url)?;
+        let git_path = AbsolutePath::new(dir.clone(), &path);
+        info!("Git directory: {niche:?}: {git_path:?}");
+        if thundercloud_fs.path_type(&git_path).await == Directory {
+            path.push(dir);
+            info!("TODO: Update repository [{fetch_url:?}] in [{path:?}]");
+            git_pull(&path).await?;
+        } else {
+            info!("TODO: Clone repository [{fetch_url:?}] into [{path:?}] / [{dir:?}]");
+            git_clone(fetch_url, &path, &dir).await?;
+            path.push(dir);
         }
-        info!("TODO: Clone repository [{fetch_url:?}] into [{path:?}]");
-        // return Ok((Some(path), Some(thundercloud_fs)));
+        return Ok((Some(path), RealFs));
     }
     Ok((None, ProjectFs))
+}
+
+async fn git_pull(path: &AbsolutePath) -> Result<()> {
+    let path_clone = PathBuf::clone(path);
+    let path_os_string = path_clone.into_os_string();
+    let mut child = Command::new("git")
+        .arg("-C").arg(path_os_string)
+        .arg("pull")
+        .spawn()?;
+    let status = child.wait().await?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("Git clone exited with status {status:?}"))
+    }
+}
+
+async fn git_clone(fetch_url: &str, path: &AbsolutePath, dir: &str) -> Result<()> {
+    let path_clone = PathBuf::clone(path);
+    create_dir_all(path_clone.clone()).await?;
+    let mut child = Command::new("git")
+        .current_dir(path_clone)
+        .arg("clone").arg(fetch_url).arg(dir)
+        .spawn()?;
+    let status = child.wait().await?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("Git clone exited with status {status:?}"))
+    }
+}
+
+fn digest(fetch_url: &str) -> Result<String> {
+    let mut hasher = Sha256::new();
+    hasher.update(fetch_url.as_bytes());
+    let hash = hasher.finalize();
+    let length = encoded_len(hash.as_slice());
+    let mut buffer = [0u8; 64];
+    base16ct::lower::encode(hash.as_slice(), &mut buffer).map_err(|e| anyhow!(e))?;
+    let digest = String::from_utf8_lossy(buffer.get(0..length).ok_or_else(|| anyhow!(""))?);
+    Ok(digest.to_string())
 }
 
 #[cfg(test)]
