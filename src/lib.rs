@@ -13,11 +13,10 @@ mod niche;
 mod path;
 mod thundercloud;
 
-use crate::config_model::{project_config, NicheTriggers, PsychotropicConfig, UseThundercloudConfig};
+use crate::config_model::{project_config, NicheTriggers, ProjectConfig, PsychotropicConfig, UseThundercloudConfig};
 use crate::file_system::{ConfigFormat, FileSystem, PathType};
 use crate::niche::process_niche;
 use crate::path::AbsolutePath;
-use crate::config_model::project_config::ProjectConfig;
 
 #[derive(Parser,Debug)]
 #[command(version, about, long_about = None)]
@@ -60,6 +59,12 @@ enum NicheStatus {
     AllScheduled(usize),
 }
 
+#[derive(Debug)]
+struct ProjectContext<PC: ProjectConfig> {
+    project_config: PC,
+    target_directory: AbsolutePath
+}
+
 pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<PathBuf>, fs: &FS) -> Result<()> {
     let cwd = AbsolutePath::current_dir()?;
     let project_root_path = project_root_option.unwrap_or(PathBuf::from("."));
@@ -71,13 +76,19 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     } else {
         "".to_string()
     };
-    let project_configuration = project_config::from_str(&project_config_data, ConfigFormat::TOML)?;
+    let project_config = project_config::from_str(&project_config_data, ConfigFormat::TOML)?;
 
-    let niches_directory= AbsolutePath::new(project_configuration.niches_directory().as_path(), &project_root);
+    let niches_directory = AbsolutePath::new(project_config.niches_directory().as_path(), &project_root);
     info!("Niches configuration directory: {niches_directory:?}");
 
-    let project_config = Arc::new(project_configuration);
-    info!("Project configuration: {project_config:?}");
+    let target_directory = AbsolutePath::new("target/igor", &cwd);
+    let project_context_data = ProjectContext {
+        project_config,
+        target_directory
+    };
+
+    let project_context = Arc::new(project_context_data);
+    info!("Project context: {project_context:?}");
 
     let mut handles = Vec::new();
     let permits = 5;
@@ -87,9 +98,9 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     for _ in 1..permits {
         tx_permit.send(()).await?;
     }
-    let collector_join_handle = tokio::spawn(collect_done(project_config.clone(), permits, rx_done, tx_work.clone(), tx_permit.clone()));
+    let collector_join_handle = tokio::spawn(collect_done(project_context.clone(), permits, rx_done, tx_work.clone(), tx_permit.clone()));
     handles.push(collector_join_handle);
-    let emitter_join_handle = tokio::spawn(emit_niches(project_config.clone(), tx_work.clone()));
+    let emitter_join_handle = tokio::spawn(emit_niches(project_context.clone(), tx_work.clone()));
     handles.push(emitter_join_handle);
 
     let mut scheduled_count = None;
@@ -104,7 +115,7 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
                 }
                 debug!("Got permit for: {:?}", &niche);
                 let niche_fs = fs.clone();
-                let niche_join_handle = tokio::spawn(run_process_niche(project_root.clone(), niche.clone(), niche_fs, project_config.clone(), tx_done.clone()));
+                let niche_join_handle = tokio::spawn(run_process_niche(project_root.clone(), niche.clone(), niche_fs, project_context.clone(), tx_done.clone()));
                 handles.push(niche_join_handle);
                 started_count += 1;
                 if scheduled_count.map(|scheduled| started_count >= scheduled).unwrap_or(false) {
@@ -136,10 +147,10 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     Ok(())
 }
 
-async fn collect_done<PC>(project_config: Arc<PC>, max_slack: usize, mut rx_done: Receiver<NicheName>, tx_work: Sender<NicheStatus>, tx_permit: Sender<()>) -> Result<()>
+async fn collect_done<PC>(project_context: Arc<ProjectContext<PC>>, max_slack: usize, mut rx_done: Receiver<NicheName>, tx_work: Sender<NicheStatus>, tx_permit: Sender<()>) -> Result<()>
 where PC: ProjectConfig
 {
-    let psychotropic_config = project_config.psychotropic()?;
+    let psychotropic_config = project_context.project_config.psychotropic()?;
     let mut wait_count = AHashMap::new();
     let mut waiting: AHashMap<NicheName, Vec<NicheName>> = AHashMap::new();
     for triggers in psychotropic_config.values() {
@@ -195,12 +206,12 @@ where PC: ProjectConfig
     Ok(())
 }
 
-async fn emit_niches<PC>(project_config: Arc<PC>, tx: Sender<NicheStatus>) -> Result<()>
+async fn emit_niches<PC>(project_context: Arc<ProjectContext<PC>>, tx: Sender<NicheStatus>) -> Result<()>
 where
     PC: ProjectConfig,
 {
     let mut count = 0;
-    let result = do_emit_independent(&project_config, &tx).await;
+    let result = do_emit_independent(&project_context, &tx).await;
     if let Ok(independent) = &result {
         count += independent;
     } else {
@@ -213,10 +224,10 @@ where
     Ok(())
 }
 
-async fn do_emit_independent<PC>(project_config: &Arc<PC>, tx: &Sender<NicheStatus>) -> Result<usize>
+async fn do_emit_independent<PC>(project_context: &Arc<ProjectContext<PC>>, tx: &Sender<NicheStatus>) -> Result<usize>
 where PC: ProjectConfig
 {
-    let psychotropic_config = project_config.psychotropic()?;
+    let psychotropic_config = project_context.project_config.psychotropic()?;
     let independent = psychotropic_config.independent();
     let mut count = 0;
     for niche in independent {
@@ -234,12 +245,13 @@ where PC: ProjectConfig
     Ok(count)
 }
 
-async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: NicheName, niche_fs: FS, project_config: Arc<PC>, tx_done: Sender<NicheName>) -> Result<()> {
+async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: AbsolutePath, niche: NicheName, niche_fs: FS, project_context: Arc<ProjectContext<PC>>, tx_done: Sender<NicheName>) -> Result<()> {
     debug!("Processing niche: {:?}", &niche);
+    let project_config = &project_context.project_config;
     let psychotropic = project_config.psychotropic()?;
     let result = if let Some(use_thundercloud) = get_use_thundercloud_option(&niche, &niche_fs, &psychotropic).await? {
         let niches_directory = project_config.niches_directory();
-        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), project_config.invar_defaults().into_owned(), niche_fs).await
+        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), project_config.invar_defaults().into_owned(), niche_fs, project_context.target_directory.clone()).await
     } else {
         warn!("Niche not found: {:?}", &niche);
         Ok(())

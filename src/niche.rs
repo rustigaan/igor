@@ -12,13 +12,13 @@ use crate::path::{AbsolutePath, RelativePath};
 #[derive(Eq,PartialEq)]
 enum UseFileSystem { ProjectFs, RealFs }
 
-pub async fn process_niche<UT: UseThundercloudConfig, FS: FileSystem, IC: InvarConfig>(project_root: AbsolutePath, niches_directory: RelativePath, niche: NicheName, use_thundercloud: UT, invar_config_default: IC, fs: FS) -> Result<()> {
+pub async fn process_niche<UT: UseThundercloudConfig, FS: FileSystem, IC: InvarConfig>(project_root: AbsolutePath, niches_directory: RelativePath, niche: NicheName, use_thundercloud: UT, invar_config_default: IC, fs: FS, target_dir: AbsolutePath) -> Result<()> {
     let absolute_niches_directory = AbsolutePath::new(niches_directory.as_path(), &project_root);
     let niche_directory = AbsolutePath::new(niche.to_str(), &absolute_niches_directory);
     let mut invar = niche_directory.clone();
     invar.push("invar");
 
-    let thundercloud_directory = get_thundercloud_directory(&project_root, &niche, &use_thundercloud, &fs).await?;
+    let thundercloud_directory = get_thundercloud_directory(&project_root, &niche, &use_thundercloud, &fs, target_dir).await?;
     if let (Some(thundercloud_directory), use_fs) = thundercloud_directory {
         info!("Thundercloud directory: {thundercloud_directory:?}");
 
@@ -53,7 +53,7 @@ async fn create_config_and_call_process_niche<UT: UseThundercloudConfig, FS: Fil
     Ok(())
 }
 
-async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(project_root: &AbsolutePath, niche: &NicheName, use_thundercloud: &UT, fs: &FS) -> Result<(Option<AbsolutePath>, UseFileSystem)> {
+async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(project_root: &AbsolutePath, niche: &NicheName, use_thundercloud: &UT, fs: &FS, target_dir: AbsolutePath) -> Result<(Option<AbsolutePath>, UseFileSystem)> {
     if let Some(directory) = use_thundercloud.directory() {
         debug!("Directory: {niche:?}: {directory:?}");
 
@@ -76,9 +76,8 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(p
         let thundercloud_fs = real_file_system();
         let fetch_url = git_remote.fetch_url();
         info!("Fetch URL: {niche:?}: {fetch_url:?}");
-        let mut path = RelativePath::from("target/igor");
+        let mut path = target_dir.clone();
         path.push(niche.to_str());
-        let path = path.relative_to(project_root);
         info!("Git directory: {niche:?}: {path:?}");
         if thundercloud_fs.path_type(&path).await == Directory {
             info!("TODO: Update repository [{fetch_url:?}] into [{path:?}]");
@@ -117,9 +116,10 @@ mod test {
             .unwrap();
         let niches_directory = RelativePath::from("yeth-marthter");
         let default_invar_config = invar_config::from_str("", TOML)?;
+        let target_dir = create_target_dir()?;
 
         // When
-        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), default_invar_config, fs.clone()).await?;
+        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), default_invar_config, fs.clone(), target_dir).await?;
 
         // Then
         let content = fs.get_content(to_absolute_path("/workshop/clock.yaml")).await?;
@@ -150,9 +150,10 @@ mod test {
             .unwrap();
         let niches_directory = RelativePath::from("yeth-marthter");
         let default_invar_config = invar_config::from_str("", TOML)?;
+        let target_dir = create_target_dir()?;
 
         // When
-        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), default_invar_config, fs.clone()).await?;
+        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), default_invar_config, fs.clone(), target_dir).await?;
 
         // Then
         let content = fs.get_content(to_absolute_path("/workshop/clock.yaml")).await?;
@@ -165,6 +166,11 @@ mod test {
         assert_eq!(&content, expected);
 
         Ok(())
+    }
+
+    fn create_target_dir() -> Result<AbsolutePath> {
+        let cwd = AbsolutePath::current_dir()?;
+        Ok(AbsolutePath::new("target/igor", &cwd))
     }
 
     fn create_file_system_fixture() -> Result<impl FileSystem> {
