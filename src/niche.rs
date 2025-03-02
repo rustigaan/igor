@@ -22,12 +22,15 @@ pub async fn process_niche<UT: UseThundercloudConfig, FS: FileSystem, IC: InvarC
     if let (Some(thundercloud_directory), use_fs) = thundercloud_directory {
         info!("Thundercloud directory: {thundercloud_directory:?}");
 
-        if use_fs == RealFs {
-            let  tfs = real_file_system().read_only();
-            create_config_and_call_process_niche(project_root, use_thundercloud, invar_config_default, fs, tfs, thundercloud_directory, invar).await
-        } else {
-            let  tfs = fs.clone();
-            create_config_and_call_process_niche(project_root, use_thundercloud, invar_config_default, fs, tfs, thundercloud_directory, invar).await
+        match use_fs {
+            RealFs => {
+                let  tfs = real_file_system().read_only();
+                create_config_and_call_process_niche(project_root, use_thundercloud, invar_config_default, fs, tfs, thundercloud_directory, invar).await
+            },
+            ProjectFs => {
+                let  tfs = fs.clone();
+                create_config_and_call_process_niche(project_root, use_thundercloud, invar_config_default, fs, tfs, thundercloud_directory, invar).await
+            }
         }
     } else {
         Ok(())
