@@ -2,38 +2,55 @@ use anyhow::Result;
 use log::{debug, info};
 use toml::{Table, Value};
 use crate::config_model::{GitRemoteConfig, InvarConfig, UseThundercloudConfig};
-use crate::file_system::FileSystem;
+use crate::file_system::{real_file_system, FileSystem};
 use crate::{interpolate, NicheName};
 use crate::file_system::PathType::Directory;
+use crate::niche::UseFileSystem::{ProjectFs, RealFs};
 use crate::thundercloud;
 use crate::path::{AbsolutePath, RelativePath};
 
+#[derive(Eq,PartialEq)]
+enum UseFileSystem { ProjectFs, RealFs }
+
 pub async fn process_niche<UT: UseThundercloudConfig, FS: FileSystem, IC: InvarConfig>(project_root: AbsolutePath, niches_directory: RelativePath, niche: NicheName, use_thundercloud: UT, invar_config_default: IC, fs: FS) -> Result<()> {
-    if let Some(thundercloud_directory) = get_thundercloud_directory(&project_root, &niche, &use_thundercloud, &fs).await? {
+    let absolute_niches_directory = AbsolutePath::new(niches_directory.as_path(), &project_root);
+    let niche_directory = AbsolutePath::new(niche.to_str(), &absolute_niches_directory);
+    let mut invar = niche_directory.clone();
+    invar.push("invar");
+
+    let thundercloud_directory = get_thundercloud_directory(&project_root, &niche, &use_thundercloud, &fs).await?;
+    if let (Some(thundercloud_directory), use_fs) = thundercloud_directory {
         info!("Thundercloud directory: {thundercloud_directory:?}");
 
-        let absolute_niches_directory = AbsolutePath::new(niches_directory.as_path(), &project_root);
-        let niche_directory = AbsolutePath::new(niche.to_str(), &absolute_niches_directory);
-
-        let mut invar = niche_directory.clone();
-        invar.push("invar");
-        let thunder_config = use_thundercloud.new_thunder_config(
-            invar_config_default,
-            fs.clone().read_only(),
-            thundercloud_directory,
-            fs,
-            invar,
-            project_root,
-        );
-        debug!("Thunder_config: {thunder_config:?}");
-
-        thundercloud::process_niche(thunder_config).await?;
+        if use_fs == RealFs {
+            let  tfs = real_file_system().read_only();
+            create_config_and_call_process_niche(project_root, use_thundercloud, invar_config_default, fs, tfs, thundercloud_directory, invar).await
+        } else {
+            let  tfs = fs.clone();
+            create_config_and_call_process_niche(project_root, use_thundercloud, invar_config_default, fs, tfs, thundercloud_directory, invar).await
+        }
+    } else {
+        Ok(())
     }
+}
+
+async fn create_config_and_call_process_niche<UT: UseThundercloudConfig, FS: FileSystem, TFS: FileSystem, IC: InvarConfig>(project_root: AbsolutePath, use_thundercloud: UT, invar_config_default: IC, fs: FS, tfs: TFS, thundercloud_directory: AbsolutePath, invar: AbsolutePath) -> Result<()> {
+    let thunder_config = use_thundercloud.new_thunder_config(
+        invar_config_default,
+        tfs.read_only(),
+        thundercloud_directory,
+        fs,
+        invar,
+        project_root,
+    );
+    debug!("Thunder_config: {thunder_config:?}");
+
+    thundercloud::process_niche(thunder_config).await?;
 
     Ok(())
 }
 
-async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(project_root: &AbsolutePath, niche: &NicheName, use_thundercloud: &UT, fs: &FS) -> Result<Option<AbsolutePath>> {
+async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(project_root: &AbsolutePath, niche: &NicheName, use_thundercloud: &UT, fs: &FS) -> Result<(Option<AbsolutePath>, UseFileSystem)> {
     if let Some(directory) = use_thundercloud.directory() {
         debug!("Directory: {niche:?}: {directory:?}");
 
@@ -47,26 +64,27 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(p
         let thundercloud_directory = AbsolutePath::new(directory.to_string(), &current_dir);
         if fs.path_type(&thundercloud_directory).await == Directory {
             info!("Thundercloud directory: {niche:?}: {directory:?}");
-            return Ok(Some(thundercloud_directory.to_owned()))
+            return Ok((Some(thundercloud_directory.to_owned()), ProjectFs))
         } else {
             info!("Not found: Directory: {niche:?}: {directory:?}. Try Git");
         }
     }
     if let Some(git_remote) = use_thundercloud.git_remote() {
+        let thundercloud_fs = real_file_system();
         let fetch_url = git_remote.fetch_url();
         info!("Fetch URL: {niche:?}: {fetch_url:?}");
         let mut path = RelativePath::from("target/igor");
         path.push(niche.to_str());
         let path = path.relative_to(project_root);
         info!("Git directory: {niche:?}: {path:?}");
-        if fs.path_type(&path).await == Directory {
+        if thundercloud_fs.path_type(&path).await == Directory {
             info!("TODO: Update repository [{fetch_url:?}] into [{path:?}]");
-            return Ok(Some(path));
+            return Ok((Some(path), RealFs));
         }
         info!("TODO: Clone repository [{fetch_url:?}] into [{path:?}]");
-        // return Ok(Some(path));
+        // return Ok((Some(path), Some(thundercloud_fs)));
     }
-    Ok(None)
+    Ok((None, ProjectFs))
 }
 
 #[cfg(test)]
