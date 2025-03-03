@@ -15,7 +15,7 @@ pub enum OnIncoming {
 
 pub trait UseThundercloudConfig : Debug + Clone + Send + Sync {
     type InvarConfigImpl : InvarConfig;
-    type GitRemoteConfigImpl : GitRemoteConfig;
+    type GitRemoteConfigImpl : GitRemoteConfig + Send + Sync;
     fn directory(&self) -> Option<&str>;
     fn on_incoming(&self) -> &OnIncoming;
     fn features(&self) -> &[String];

@@ -58,7 +58,7 @@ async fn create_config_and_call_process_niche<UT: UseThundercloudConfig, FS: Fil
     Ok(())
 }
 
-async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(project_root: &AbsolutePath, niche: &NicheName, use_thundercloud: &UT, fs: &FS, target_dir: AbsolutePath) -> Result<(Option<AbsolutePath>, UseFileSystem)> {
+async fn get_thundercloud_directory<UT: UseThundercloudConfig + Send + Sync, FS: FileSystem>(project_root: &AbsolutePath, niche: &NicheName, use_thundercloud: &UT, fs: &FS, target_dir: AbsolutePath) -> Result<(Option<AbsolutePath>, UseFileSystem)> {
     if let Some(directory) = use_thundercloud.directory() {
         debug!("Directory: {niche:?}: {directory:?}");
 
@@ -82,7 +82,7 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(p
         let fetch_url = git_remote.fetch_url();
         info!("Fetch URL: {niche:?}: {fetch_url:?}");
         let mut path = target_dir.clone();
-        let dir = digest(fetch_url)?;
+        let dir = digest(git_remote)?;
         let git_path = AbsolutePath::new(dir.clone(), &path);
         info!("Git directory: {niche:?}: {git_path:?}");
         if thundercloud_fs.path_type(&git_path).await == Directory {
@@ -91,7 +91,7 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig, FS: FileSystem>(p
             git_pull(&path).await?;
         } else {
             info!("TODO: Clone repository [{fetch_url:?}] into [{path:?}] / [{dir:?}]");
-            git_clone(fetch_url, &path, &dir).await?;
+            git_clone(git_remote, &path, &dir).await?;
             path.push(dir);
         }
         return Ok((Some(path), RealFs));
@@ -114,12 +114,14 @@ async fn git_pull(path: &AbsolutePath) -> Result<()> {
     }
 }
 
-async fn git_clone(fetch_url: &str, path: &AbsolutePath, dir: &str) -> Result<()> {
+async fn git_clone(git_remote_config: &impl GitRemoteConfig, path: &AbsolutePath, dir: &str) -> Result<()> {
     let path_clone = PathBuf::clone(path);
     create_dir_all(path_clone.clone()).await?;
     let mut child = Command::new("git")
         .current_dir(path_clone)
-        .arg("clone").arg(fetch_url).arg(dir)
+        .arg("clone")
+        .arg("--branch").arg(git_remote_config.revision())
+        .arg(git_remote_config.fetch_url()).arg(dir)
         .spawn()?;
     let status = child.wait().await?;
     if status.success() {
@@ -129,9 +131,11 @@ async fn git_clone(fetch_url: &str, path: &AbsolutePath, dir: &str) -> Result<()
     }
 }
 
-fn digest(fetch_url: &str) -> Result<String> {
+fn digest(git_remote_config: &impl GitRemoteConfig) -> Result<String> {
     let mut hasher = Sha256::new();
-    hasher.update(fetch_url.as_bytes());
+    hasher.update(git_remote_config.fetch_url().as_bytes());
+    hasher.update([0u8; 1]);
+    hasher.update(git_remote_config.revision().as_bytes());
     let hash = hasher.finalize();
     let length = encoded_len(hash.as_slice());
     let mut buffer = [0u8; 64];
@@ -185,7 +189,7 @@ mod test {
         Ok(())
     }
 
-    //#[test(tokio::test)]
+    #[test(tokio::test)]
     async fn test_git_remote() -> Result<()> {
         // Given
         let fs = create_file_system_fixture()?;
@@ -243,10 +247,18 @@ mod test {
 
             [psychotropic.cues.use-thundercloud.git-remote]
             fetch-url = "https://github.com/rustigaan/example-thundercloud.git"
-            revision = "main"
+            revision = "v0.1.0"
             """
 
             [yeth-marthter.example.invar.workshop]
+            "clock+config-glass.yaml.toml" = """
+            write-mode = "Overwrite"
+
+            [props]
+            sweeper = "Lu Tse"
+            """
+
+            [yeth-marthter.example-git-remote.invar.workshop]
             "clock+config-glass.yaml.toml" = """
             write-mode = "Overwrite"
 
