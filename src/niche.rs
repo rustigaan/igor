@@ -88,7 +88,7 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig + Send + Sync, FS:
         if thundercloud_fs.path_type(&git_path).await == Directory {
             path.push(dir);
             info!("TODO: Update repository [{fetch_url:?}] in [{path:?}]");
-            git_pull(&path).await?;
+            git_pull(git_remote, &path).await?;
         } else {
             info!("TODO: Clone repository [{fetch_url:?}] into [{path:?}] / [{dir:?}]");
             git_clone(git_remote, &path, &dir).await?;
@@ -99,12 +99,12 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig + Send + Sync, FS:
     Ok((None, ProjectFs))
 }
 
-async fn git_pull(path: &AbsolutePath) -> Result<()> {
+async fn git_pull(git_remote_config: &impl GitRemoteConfig, path: &AbsolutePath) -> Result<()> {
     let path_clone = PathBuf::clone(path);
     let path_os_string = path_clone.into_os_string();
     let mut child = Command::new("git")
         .arg("-C").arg(path_os_string)
-        .arg("pull")
+        .arg("checkout").arg("--detach").arg(git_remote_config.revision())
         .spawn()?;
     let status = child.wait().await?;
     if status.success() {
@@ -217,6 +217,7 @@ mod test {
             raising:
               - "steam"
               - "money"
+              - "arizona"
         "#};
         assert_eq!(&content, expected);
 
@@ -247,7 +248,7 @@ mod test {
 
             [psychotropic.cues.use-thundercloud.git-remote]
             fetch-url = "https://github.com/rustigaan/example-thundercloud.git"
-            revision = "v0.1.0"
+            revision = "v0.1.1"
             """
 
             [yeth-marthter.example.invar.workshop]
