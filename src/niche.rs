@@ -87,12 +87,15 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig + Send + Sync, FS:
         info!("Git directory: {niche:?}: {git_path:?}");
         if thundercloud_fs.path_type(&git_path).await == Directory {
             path.push(dir);
-            info!("TODO: Update repository [{fetch_url:?}] in [{path:?}]");
+            info!("Update repository [{fetch_url:?}] in [{path:?}]");
             git_pull(git_remote, &path).await?;
         } else {
-            info!("TODO: Clone repository [{fetch_url:?}] into [{path:?}] / [{dir:?}]");
+            info!("Clone repository [{fetch_url:?}] into [{path:?}] / [{dir:?}]");
             git_clone(git_remote, &path, &dir).await?;
             path.push(dir);
+        }
+        if let Some(sub_path) = git_remote.sub_path() {
+            path.push(sub_path)
         }
         return Ok((Some(path), RealFs));
     }
@@ -224,6 +227,42 @@ mod test {
         Ok(())
     }
 
+    #[test(tokio::test)]
+    async fn test_embedded_git_remote() -> Result<()> {
+        // Given
+        let fs = create_file_system_fixture()?;
+
+        let project_root = AbsolutePath::root();
+        let cargo_cult_toml_data = fs.get_content(AbsolutePath::new("CargoCult.toml", &project_root)).await?;
+        let project_config = project_config::from_str(&cargo_cult_toml_data, TOML)?;
+        let niche = NicheName::new("example-git-remote-embedded");
+        let psychotropic = project_config.psychotropic()?;
+        let use_thundercloud = psychotropic
+            .get(niche.to_str())
+            .map(NicheTriggers::use_thundercloud).flatten()
+            .unwrap();
+        let niches_directory = RelativePath::from("yeth-marthter");
+        let default_invar_config = invar_config::from_str("", TOML)?;
+        let target_dir = create_target_dir()?;
+
+        // When
+        process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), default_invar_config, fs.clone(), target_dir).await?;
+
+        // Then
+        let content = fs.get_content(to_absolute_path("/workshop/clock.yaml")).await?;
+        let expected = indoc! {r#"
+            ---
+            raising:
+              - "steam"
+              - "funds"
+              - "descendants"
+            # EOF
+        "#};
+        assert_eq!(&content, expected);
+
+        Ok(())
+    }
+
     fn create_target_dir() -> Result<AbsolutePath> {
         let cwd = AbsolutePath::current_dir()?;
         Ok(AbsolutePath::new("target/igor", &cwd))
@@ -249,6 +288,18 @@ mod test {
             [psychotropic.cues.use-thundercloud.git-remote]
             fetch-url = "https://github.com/rustigaan/example-thundercloud.git"
             revision = "v0.1.1"
+
+            [[psychotropic.cues]]
+            name = "example-git-remote-embedded"
+
+            [psychotropic.cues.use-thundercloud]
+            directory = "{{PROJECT}}/non-existent"
+            features = ["glass"]
+
+            [psychotropic.cues.use-thundercloud.git-remote]
+            fetch-url = "https://github.com/rustigaan/example-thundercloud.git"
+            revision = "v0.1.2"
+            sub-path = "embedded"
             """
 
             [yeth-marthter.example.invar.workshop]
@@ -265,6 +316,14 @@ mod test {
 
             [props]
             sweeper = "Lu Tse"
+            """
+
+            [yeth-marthter.example-git-remote-embedded.invar.workshop]
+            "clock+config-glass.yaml.toml" = """
+            write-mode = "Overwrite"
+
+            [props]
+            sweeper = "sorcerer's apprentice"
             """
 
             [example-thundercloud]
