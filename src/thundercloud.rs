@@ -277,7 +277,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             return Ok(())
         }
         let file_system = self.0.project_file_system();
-        if let Some(target_file) = file_system.open_target(target_path.clone(), invar_config.write_mode()).await? {
+        if let Some(target_file) = file_system.open_target(target_path.clone(), invar_config.write_mode(), invar_config.executable()).await? {
             let source = option.source();
             match option.context() {
                 ThunderCloud => {

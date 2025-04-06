@@ -11,13 +11,14 @@ use crate::file_system::ConfigFormat;
 #[serde(rename_all = "kebab-case")]
 pub struct InvarConfigData {
     write_mode: Option<WriteMode>,
+    executable: Option<bool>,
     interpolate: Option<bool>,
     props: Option<Table>,
 }
 
 impl InvarConfigData {
     pub fn new() -> InvarConfigData {
-        InvarConfigData { write_mode: None, interpolate: None, props: Some(Table::new()) }
+        InvarConfigData { write_mode: None, executable: None, interpolate: None, props: Some(Table::new()) }
     }
 }
 
@@ -60,19 +61,21 @@ impl InvarConfig for InvarConfigData {
         let dirty = false;
         let (write_mode, dirty) = merge_property(self.write_mode, invar_config.write_mode_option(), dirty);
         debug!("Write mode: {:?} -> {:?} ({:?})", self.write_mode, &write_mode, dirty);
+        let (executable, dirty) = merge_property(self.executable, invar_config.executable_option(), dirty);
+        debug!("Executable: {:?} -> {:?} ({:?})", self.executable, &executable, dirty);
         let (interpolate, dirty) = merge_property(self.interpolate, invar_config.interpolate_option(), dirty);
         debug!("Interpolate: {:?} -> {:?} ({:?})", self.interpolate, &interpolate, dirty);
         let (props, dirty) = merge_props(&self.props, &invar_config.props_option(), dirty);
         debug!("Props ({:?})", dirty);
         if dirty {
-            Cow::Owned(InvarConfigData { write_mode, interpolate, props: Some(props.into_owned()) })
+            Cow::Owned(InvarConfigData { write_mode, executable, interpolate, props: Some(props.into_owned()) })
         } else {
             Cow::Borrowed(self)
         }
     }
 
     fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self> {
-        let invar_config = InvarConfigData { write_mode, interpolate: None, props: None };
+        let invar_config = InvarConfigData { write_mode, executable: None, interpolate: None, props: None };
         self.with_invar_config(invar_config)
     }
 
@@ -88,8 +91,25 @@ impl InvarConfig for InvarConfigData {
         self.write_mode
     }
 
+    fn with_executable_option(&self, executable: Option<bool>) -> Cow<Self> {
+        let invar_config = InvarConfigData { write_mode: None, executable, interpolate: None, props: None };
+        self.with_invar_config(invar_config)
+    }
+
+    fn with_executable(&self, executable: bool) -> Cow<Self> {
+        self.with_executable_option(Some(executable))
+    }
+
+    fn executable(&self) -> bool {
+        self.executable.unwrap_or(false)
+    }
+
+    fn executable_option(&self) -> Option<bool> {
+        self.executable
+    }
+
     fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<Self> {
-        let invar_config = InvarConfigData { write_mode: None, interpolate, props: None };
+        let invar_config = InvarConfigData { write_mode: None, executable: None, interpolate, props: None };
         self.with_invar_config(invar_config)
     }
 
@@ -106,7 +126,7 @@ impl InvarConfig for InvarConfigData {
     }
 
     fn with_props_option(&self, props: Option<Table>) -> Cow<Self> {
-        let invar_config = InvarConfigData { write_mode: None, interpolate: None, props };
+        let invar_config = InvarConfigData { write_mode: None, executable: None, interpolate: None, props };
         self.with_invar_config(invar_config)
     }
 
@@ -446,7 +466,7 @@ mod test {
     // Utility functions
 
     fn empty_invar_config() -> impl InvarConfig {
-        InvarConfigData { write_mode: None, interpolate: None, props: None }
+        InvarConfigData { write_mode: None, executable: None, interpolate: None, props: None }
     }
 
     fn new_invar_config() -> impl InvarConfig {

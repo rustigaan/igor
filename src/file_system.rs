@@ -42,7 +42,7 @@ pub trait FileSystem: Debug + Send + Sync + Sized + Clone {
     type DirEntryItem: DirEntry;
     fn read_dir(&self, directory: &AbsolutePath) -> impl Future<Output = Result<impl Stream<Item = Result<Self::DirEntryItem>> + Send + Sync + Unpin>> + Send;
     fn path_type(&self, path: &AbsolutePath) -> impl Future<Output = PathType> + Send;
-    fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> impl Future<Output = Result<Option<impl TargetFile>>> + Send;
+    fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode, executable: bool) -> impl Future<Output = Result<Option<impl TargetFile>>> + Send;
     fn open_source(&self, file_path: AbsolutePath) -> impl Future<Output = Result<impl SourceFile>> + Send;
     fn get_content(&self, file_path: AbsolutePath) -> impl Future<Output = Result<String>> + Send {
         async {
@@ -79,7 +79,7 @@ impl<FS: FileSystem> FileSystem for ReadOnlyFileSystem<FS> {
         self.0.path_type(path).await
     }
 
-    async fn open_target(&self, _file_path: AbsolutePath, _write_mode: WriteMode) -> Result<Option<impl TargetFile>> {
+    async fn open_target(&self, _file_path: AbsolutePath, _write_mode: WriteMode, _executable: bool) -> Result<Option<impl TargetFile>> {
         Ok(None::<DummyTarget>)
     }
 

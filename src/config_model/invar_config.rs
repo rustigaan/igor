@@ -22,6 +22,10 @@ pub trait InvarConfig : Default + Clone + Debug + Send + Sync + Sized {
     fn with_write_mode(&self, write_mode: WriteMode) -> Cow<Self>;
     fn write_mode(&self) -> WriteMode;
     fn write_mode_option(&self) -> Option<WriteMode>;
+    fn with_executable_option(&self, executable: Option<bool>) -> Cow<Self>;
+    fn with_executable(&self, executable: bool) -> Cow<Self>;
+    fn executable(&self) -> bool;
+    fn executable_option(&self) -> Option<bool>;
     fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<Self>;
     fn with_interpolate(&self, interpolate: bool) -> Cow<Self>;
     fn interpolate(&self) -> bool;

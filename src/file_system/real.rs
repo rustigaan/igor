@@ -41,6 +41,14 @@ impl DirEntry for TokioDirEntry {
     }
 }
 
+#[cfg(target_family = "unix")]
+fn set_executable(open_options: &mut OpenOptions) -> () {
+    open_options.mode(0o777);
+}
+
+#[cfg(not(target_family = "unix"))]
+fn set_executable(open_options: &mut OpenOptions) {}
+
 impl FileSystem for RealFileSystem {
     type DirEntryItem = TokioDirEntry;
 
@@ -61,8 +69,11 @@ impl FileSystem for RealFileSystem {
         PathType::Other
     }
 
-    async fn open_target(&self, target_file: AbsolutePath, write_mode: WriteMode) -> Result<Option<impl TargetFile>> {
+    async fn open_target(&self, target_file: AbsolutePath, write_mode: WriteMode, executable: bool) -> Result<Option<impl TargetFile>> {
         let mut open_options = OpenOptions::new().read(false).write(true).to_owned();
+        if executable {
+            set_executable(&mut open_options);
+        }
         let open_options = match write_mode {
             WriteMode::Ignore => {
                 return Ok(None)
@@ -210,7 +221,7 @@ mod test {
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
         let file_path = AbsolutePath::new("content", &path);
 
-        let target_file = fs.open_target(file_path.clone(), WriteMode::Overwrite).await?.unwrap();
+        let target_file = fs.open_target(file_path.clone(), WriteMode::Overwrite, false).await?.unwrap();
         target_file.write_line("First line.").await?;
         target_file.write_line("Second line.").await?;
         let mut target_file_mut = target_file;
@@ -237,7 +248,7 @@ mod test {
         let path = AbsolutePath::try_new(tmp_dir.to_path_buf())?;
         let file_path = AbsolutePath::new("content", &path);
 
-        if let Some(_) = fs.open_target(file_path.clone(), WriteMode::Ignore).await? {
+        if let Some(_) = fs.open_target(file_path.clone(), WriteMode::Ignore, false).await? {
             assert!(false, "Opening an ignored target should return None");
         }
         Ok(())
@@ -252,7 +263,7 @@ mod test {
 
         assert_eq!(fs.path_type(&path).await, PathType::Directory);
         assert_eq!(fs.path_type(&file_path).await, PathType::Missing);
-        if let Some(target_file) = fs.open_target(file_path.clone(), WriteMode::WriteNew).await? {
+        if let Some(target_file) = fs.open_target(file_path.clone(), WriteMode::WriteNew, false).await? {
             target_file.write_line("Some line.").await?;
             let mut target_file_mut = target_file;
             target_file_mut.close().await?;
@@ -260,7 +271,7 @@ mod test {
             assert!(false, "Could not open target file");
         }
         assert_eq!(fs.path_type(&file_path).await, PathType::File);
-        if let Some(_) = fs.open_target(file_path.clone(), WriteMode::WriteNew).await? {
+        if let Some(_) = fs.open_target(file_path.clone(), WriteMode::WriteNew, false).await? {
             assert!(false, "Opening an existing file with WriteNew should not be possible");
         }
         Ok(())

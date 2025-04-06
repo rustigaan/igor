@@ -101,9 +101,12 @@ impl FileSystem for FixtureFileSystem {
         }
     }
 
-    async fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode) -> Result<Option<impl TargetFile>> {
+    async fn open_target(&self, file_path: AbsolutePath, write_mode: WriteMode, executable: bool) -> Result<Option<impl TargetFile>> {
         if write_mode == Ignore {
             return Ok(None);
+        }
+        if executable {
+            return Err(anyhow!("Fixture does not support executable target files: {file_path:?}"));
         }
         let current = self.find_parent_entry(&file_path).await?;
         if let Some(file_name_ref) = file_path.file_name() {
@@ -488,7 +491,7 @@ mod test {
         let file_path = to_absolute_path(file);
 
         // When
-        let Some(mut target_file) = fs.open_target(file_path.clone(), Overwrite).await? else { bail!("Could not open target") };
+        let Some(mut target_file) = fs.open_target(file_path.clone(), Overwrite, false).await? else { bail!("Could not open target") };
         target_file.write_line("Replacement").await?;
         target_file.close().await?;
 
@@ -509,7 +512,7 @@ mod test {
         let parent = to_absolute_path(parent_str);
 
         // When
-        let result = fs.open_target(parent, Overwrite).await;
+        let result = fs.open_target(parent, Overwrite, false).await;
 
         // Then
         let Err(err) = result else { bail!("Opening directory as target file should not be Ok") };
@@ -527,7 +530,7 @@ mod test {
         let parent = to_absolute_path(parent_str);
 
         // When
-        let target_file_option = fs.open_target(parent, WriteNew).await?;
+        let target_file_option = fs.open_target(parent, WriteNew, false).await?;
 
         // Then
         assert!(target_file_option.is_none());
@@ -541,7 +544,7 @@ mod test {
         let root = AbsolutePath::root();
 
         // When
-        let target_option = fs.open_target(root, Ignore).await?;
+        let target_option = fs.open_target(root, Ignore, false).await?;
 
         // Then
         assert!(target_option.is_none());
@@ -558,7 +561,7 @@ mod test {
         assert!(root.file_name().is_none());
 
         // When
-        let result = fs.open_target(root, WriteNew).await;
+        let result = fs.open_target(root, WriteNew, false).await;
 
         // Then
         let Err(err) = result else { bail!("Opening the root of the file-system should not be Ok") };
@@ -574,7 +577,7 @@ mod test {
         let file_in_file = to_absolute_path("/.profile/file");
 
         // When
-        let result = fs.open_target(file_in_file, WriteNew).await;
+        let result = fs.open_target(file_in_file, WriteNew, false).await;
 
         // Then
         let Err(err) = result else { bail!("Opening a target file in a file should not be Ok") };
@@ -593,7 +596,7 @@ mod test {
         let Err(_) = result else { bail!("Opening a source file in a file should not be Ok") };
 
         // When
-        let result = fs.open_target(new_file.clone(), WriteNew).await;
+        let result = fs.open_target(new_file.clone(), WriteNew, false).await;
 
         // Then
         if let Some(mut target_file) = result? {
