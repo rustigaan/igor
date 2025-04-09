@@ -12,5 +12,9 @@ wait-for = ["profile"]
 name = "#main"
 
 [[psychotropic.cues]]
+name = "containerized-nix"
+use-thundercloud = { git-remote = { fetch-url = "https://github.com/rustigaan/containerized-nix.git", revision = "main" } }
+
+[[psychotropic.cues]]
 name = "example"
 use-thundercloud = { directory = "{{PROJECT}}/example-thundercloud", on-incoming = "Update", features = ["glass", "bash_config", "kermie"], invar-defaults = { props = { marthter = "Jeremy", buyer = "Myra LeJean", milk-man = "Kaos" } } }

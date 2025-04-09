@@ -1,0 +1,21 @@
+services:
+  nix-flakes:
+    container_name: nix
+    image: "nixpkgs/nix-flakes"
+    command:
+      - bash
+      - -c
+      - "while true ; do date '+%Y-%m-%dT%H:%M:%S' ; sleep 300 ; done"
+    hostname: "nix"
+    tmpfs:
+      - /run
+      - /var/run
+    privileged: true
+    restart: always
+    volumes:
+      - nix-store:/nix
+      - ${HOME}:${HOME}
+
+volumes:
+  nix-store:
+    external: true
