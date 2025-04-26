@@ -42,7 +42,7 @@ impl ThundercloudConfig for ThundercloudConfigData {
         if let Some(invar_config) = &self.invar_defaults {
             result = Cow::Borrowed(invar_config)
         } else {
-            result = Cow::Owned(InvarConfigData::new())
+            result = Cow::Owned(InvarConfigData::default())
         }
         result
     }

@@ -15,9 +15,14 @@ pub enum WriteMode {
     Ignore
 }
 
-pub trait InvarConfig : Default + Clone + Debug + Send + Sync + Sized {
+pub trait InvarConfig: Clone + Debug + Send + Sync + Sized {
     fn from_str(body: &str, config_format: ConfigFormat) -> Result<Self>;
-    fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self>;
+    fn clone_state(&self) -> impl InvarState;
+    fn target(&self) -> Option<&String>;
+}
+
+pub trait InvarState: Default + Clone + Debug + Send + Sync + Sized {
+    fn with_invar_state<I: InvarState>(&self, invar_config: I) -> Cow<Self>;
     fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self>;
     fn with_write_mode(&self, write_mode: WriteMode) -> Cow<Self>;
     fn write_mode(&self) -> WriteMode;
@@ -57,9 +62,11 @@ mod test {
     fn invar_config_from_str() -> Result<()> {
         let toml_source = r#"write-mode = "WriteNew" "#;
         let invar_config = from_str(toml_source, ConfigFormat::TOML)?;
-        assert_eq!(invar_config.write_mode(), WriteMode::WriteNew); // From YAML
-        assert_eq!(invar_config.interpolate(), true); // Default value
-        assert_eq!(invar_config.props(), Cow::Owned(Table::new())); // Default value
+        let invar_state = invar_config.clone_state();
+        assert_eq!(invar_state.write_mode(), WriteMode::WriteNew); // From YAML
+        assert_eq!(invar_state.interpolate(), true); // Default value
+        assert_eq!(invar_state.props(), Cow::Owned(Table::new())); // Default value
+        assert_eq!(invar_config.target(), None); // Default value
         Ok(())
     }
 }

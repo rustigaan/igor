@@ -55,14 +55,15 @@ pub mod test {
         assert_eq!(use_thundercloud.features(), &["glass", "bash_config", "kermie"]);
 
         let invar_defaults = use_thundercloud.invar_defaults().into_owned();
-        assert_eq!(invar_defaults.write_mode_option(), Some(Ignore));
-        assert_eq!(invar_defaults.interpolate_option(), Some(false));
+        let invar_defaults_state = invar_defaults.clone_state();
+        assert_eq!(invar_defaults_state.write_mode_option(), Some(Ignore));
+        assert_eq!(invar_defaults_state.interpolate_option(), Some(false));
 
         let mut mapping = Table::new();
         insert_entry(&mut mapping, "marthter", "Jeremy");
         insert_entry(&mut mapping, "buyer", "Myra LeJean");
         insert_entry(&mut mapping, "milk-man", "Kaos");
-        assert_eq!(invar_defaults.props().into_owned(), mapping);
+        assert_eq!(invar_defaults_state.props().into_owned(), mapping);
 
         Ok(())
     }

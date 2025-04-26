@@ -9,7 +9,7 @@ use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use tokio_stream::StreamExt;
-use crate::config_model::{invar_config, InvarConfig, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
+use crate::config_model::{invar_config, InvarConfig, InvarState, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
 use crate::path::{AbsolutePath, RelativePath, SingleComponent};
 use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
 use crate::config_model::UseThundercloudConfig;
@@ -33,11 +33,12 @@ async fn process_niche_in_context<T: ThunderConfig>(generation_context: &Generat
     info!("Thundercloud: {:?}: {:?}", niche.name(), niche.description().unwrap_or(&"-".to_string()));
     debug!("Use thundercloud: {:?}", generation_context.0.use_thundercloud());
     let current_directory = RelativePath::from(".");
-    let invar_config = config.invar_defaults();
-    let invar_defaults = generation_context.0.default_invar_config().clone();
-    let invar_config = invar_config.with_invar_config(invar_defaults);
-    debug!("String properties: {:?}", invar_config.string_props());
-    generation_context.visit_subtree(&current_directory, FromBothCumulusAndInvar, invar_config.as_ref()).await?;
+    let default_invar_config = config.invar_defaults();
+    let default_invar_state = default_invar_config.clone_state();
+    let invar_defaults = generation_context.0.default_invar_config().clone_state();
+    let invar_state = default_invar_state.with_invar_state(invar_defaults);
+    debug!("String properties: {:?}", invar_state.string_props());
+    generation_context.visit_subtree(&current_directory, FromBothCumulusAndInvar, invar_state.as_ref()).await?;
     Ok(())
 }
 
@@ -212,9 +213,7 @@ impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
 struct GenerationContext<TC: ThunderConfig>(TC);
 
 impl<TC: ThunderConfig> GenerationContext<TC> {
-    async fn visit_subtree<IC>(&self, directory: &RelativePath, thumbs: Thumbs, invar_config: &IC) -> Result<()>
-    where IC: InvarConfig
-    {
+    async fn visit_subtree<IS: InvarState>(&self, directory: &RelativePath, thumbs: Thumbs, invar_config: &IS) -> Result<()> {
         let cumulus_directory_location = CumulusDirectoryLocation(self.0.thundercloud_file_system().clone());
         let (cumulus_bolts, cumulus_subdirectories) =
             self.try_visit_directory(thumbs.visit_cumulus(), &cumulus_directory_location, directory).await?;
@@ -234,9 +233,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn generate_files<IC>(&self, directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>, Vec<Bolt>)>, invar_config: &IC) -> Result<()>
-    where IC: InvarConfig
-    {
+    async fn generate_files<IS: InvarState>(&self, directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>, Vec<Bolt>)>, invar_config: &IS) -> Result<()> {
         let mut bolts = bolts;
         let mut use_config = Cow::Borrowed(invar_config);
         if let Some(dir_bolts) = bolts.remove(".") {
@@ -261,9 +258,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn generate_file<IC>(&self, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IC) -> Result<()>
-    where IC: InvarConfig
-    {
+    async fn generate_file<IS: InvarState>(&self, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IS) -> Result<()> {
         let option =
             if let Some(option) = option {
                 option
@@ -299,9 +294,9 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn generate_option<IC, SF, TF>(&self, option: Bolt, fragments: Vec<Bolt>, invar_config: &IC, mut source_file: SF, target_file: &TF) -> Result<()>
+    async fn generate_option<IS, SF, TF>(&self, option: Bolt, fragments: Vec<Bolt>, invar_config: &IS, mut source_file: SF, target_file: &TF) -> Result<()>
     where
-        IC: InvarConfig,
+        IS: InvarState,
         SF: SourceFile,
         TF: TargetFile
     {
@@ -325,9 +320,9 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn find_and_include_fragment<IC, TF>(&self, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+    async fn find_and_include_fragment<IS, TF>(&self, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IS) -> Result<()>
     where
-        IC: InvarConfig,
+        IS: InvarState,
         TF: TargetFile
     {
         for bolt in fragments {
@@ -355,11 +350,11 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn include_fragment<SF, TF, IC>(&self, mut source_file: SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+    async fn include_fragment<SF, TF, IS>(&self, mut source_file: SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IS) -> Result<()>
     where
         SF: SourceFile,
         TF: TargetFile,
-        IC: InvarConfig
+        IS: InvarState
     {
         while let Some(line) = source_file.next_line().await? {
             let line = interpolate(&line, invar_config);
@@ -380,11 +375,11 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn copy_to_end_of_fragment<SF, TF, IC>(&self, lines: &mut SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IC) -> Result<()>
+    async fn copy_to_end_of_fragment<SF, TF, IS>(&self, lines: &mut SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IS) -> Result<()>
     where
         SF: SourceFile,
         TF: TargetFile,
-        IC: InvarConfig
+        IS: InvarState
     {
         while let Some(fragment_line) = lines.next_line().await? {
             let line = interpolate(&fragment_line, invar_config);
@@ -408,9 +403,9 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn update_invar_config<'a, IC>(&self, invar_config: &'a IC, bolts: &Vec<Bolt>) -> Result<Cow<'a, IC>>
+    async fn update_invar_config<'a, IS>(&self, invar_config: &'a IS, bolts: &Vec<Bolt>) -> Result<Cow<'a, IS>>
     where
-        IC: InvarConfig,
+        IS: InvarState,
     {
         let mut use_config = Cow::Borrowed(invar_config);
         for bolt in bolts {
@@ -424,8 +419,9 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                     Project => project_fs.get_content(bolt.source().clone()).await?,
                 };
                 let bolt_invar_config = get_invar_config(&bolt_invar_config_body, format)?;
+                let bolt_invar_state = bolt_invar_config.clone_state();
                 debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
-                let new_use_config = use_config.to_owned().with_invar_config(bolt_invar_config).into_owned();
+                let new_use_config = use_config.to_owned().with_invar_state(bolt_invar_state).into_owned();
                 use_config = Cow::Owned(new_use_config);
             }
         }
@@ -463,10 +459,10 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         (first_option, fragments)
     }
 
-    async fn visit_subdirectories<IC>(&self, directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, invar_config: &IC) -> Result<()>
+    async fn visit_subdirectories<IS>(&self, directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, invar_config: &IS) -> Result<()>
     where
         TC: ThunderConfig,
-        IC: InvarConfig
+        IS: InvarState
     {
         let mut invar_subdirectories = invar_subdirectories;
         for path in cumulus_subdirectories {
@@ -620,7 +616,7 @@ async fn send_to_writer<TF: TargetFile>(line: &str, target_file: &TF) -> Result<
     Ok(())
 }
 
-fn interpolate<IC: InvarConfig>(line: &str, invar_config: &IC) -> String {
+fn interpolate<IS: InvarState>(line: &str, invar_config: &IS) -> String {
     crate::interpolate::interpolate(line, invar_config.props().as_ref()).into_owned()
 }
 

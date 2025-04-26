@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 pub mod invar_config;
-pub use invar_config::{InvarConfig, WriteMode};
+pub use invar_config::{InvarConfig, InvarState, WriteMode};
 mod invar_config_data;
 
 pub mod niche_description;

@@ -50,14 +50,15 @@ mod test {
         assert_eq!(thundercloud_config.niche().name(), "example");
         assert_eq!(thundercloud_config.niche().description(), Some("Example thundercloud"));
         let invar_defaults = thundercloud_config.invar_defaults().into_owned();
-        assert_eq!(invar_defaults.write_mode(), Overwrite);
-        assert_eq!(invar_defaults.interpolate_option(), Some(true));
+        let invar_defaults_state = invar_defaults.clone_state();
+        assert_eq!(invar_defaults_state.write_mode(), Overwrite);
+        assert_eq!(invar_defaults_state.interpolate_option(), Some(true));
 
         let mut mapping = Table::new();
         insert_entry(&mut mapping, "milk-man", "Ronny Soak");
         insert_entry(&mut mapping, "alter-ego", "Lobsang");
         let mapping = mapping;
-        assert_eq!(invar_defaults.props().as_ref(), &mapping);
+        assert_eq!(invar_defaults_state.props().as_ref(), &mapping);
         Ok(())
     }
 
@@ -77,13 +78,14 @@ mod test {
         assert_eq!(thundercloud_config.niche().name(), "example");
         assert_eq!(thundercloud_config.niche().description(), None);
         let invar_defaults = thundercloud_config.invar_defaults().into_owned();
-        assert_eq!(invar_defaults.write_mode_option(), None);
-        assert_eq!(invar_defaults.write_mode(), Overwrite);
-        assert_eq!(invar_defaults.interpolate_option(), None);
-        assert_eq!(invar_defaults.interpolate(), true);
+        let invar_defaults_state = invar_defaults.clone_state();
+        assert_eq!(invar_defaults_state.write_mode_option(), None);
+        assert_eq!(invar_defaults_state.write_mode(), Overwrite);
+        assert_eq!(invar_defaults_state.interpolate_option(), None);
+        assert_eq!(invar_defaults_state.interpolate(), true);
 
         let mapping = Table::new();
-        assert_eq!(invar_defaults.props().as_ref(), &mapping);
+        assert_eq!(invar_defaults_state.props().as_ref(), &mapping);
         Ok(())
     }
 }

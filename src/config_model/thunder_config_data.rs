@@ -1,6 +1,6 @@
 use crate::config_model::invar_config_data::InvarConfigData;
 use crate::file_system::{DirEntry, FileSystem};
-use super::{InvarConfig, ThunderConfig, UseThundercloudConfig};
+use super::{InvarConfig, InvarState, ThunderConfig, UseThundercloudConfig};
 use super::use_thundercloud_config_data::UseThundercloudConfigData;
 use crate::path::AbsolutePath;
 
@@ -18,10 +18,13 @@ pub struct ThunderConfigData<TFS: FileSystem, PFS: FileSystem> {
 
 impl<TFS: FileSystem, PFS: FileSystem> ThunderConfigData<TFS, PFS> {
     pub fn new<IC: InvarConfig>(use_thundercloud: UseThundercloudConfigData, default_invar_config: IC, thundercloud_directory: AbsolutePath, invar: AbsolutePath, project: AbsolutePath, thundercloud_file_system: TFS, project_file_system: PFS) -> Self {
-        let default_invar_config = InvarConfigData::new()
-            .with_invar_config(default_invar_config)
-            .with_invar_config(use_thundercloud.invar_defaults().into_owned())
-            .into_owned();
+        let invar_state = default_invar_config.clone_state();
+        let invar_defaults = use_thundercloud.invar_defaults();
+        let invar_state = invar_state
+            .with_invar_state(invar_defaults.clone_state());
+        let target = invar_defaults.target()
+            .or(default_invar_config.target());
+        let default_invar_config = InvarConfigData::new(invar_state.as_ref(), target);
         let mut cumulus = thundercloud_directory.clone();
         cumulus.push("cumulus");
         ThunderConfigData {

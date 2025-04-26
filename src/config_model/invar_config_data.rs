@@ -25,10 +25,10 @@ macro_rules! invar_struct {
 }
 
 invar_struct! [pub InvarConfigData[Default] {
-//    target: Option<String>
+    target: Option<String>
 }];
 
-invar_struct! [pub InvarConfigState {}];
+invar_struct! [pub InvarStateData[Default] {}];
 
 static EMPTY_INVAR_CONFIG_DATA: LazyLock<InvarConfigData> = LazyLock::new(|| {
     let default_invar_config_data = InvarConfigData::default();
@@ -38,9 +38,29 @@ static EMPTY_INVAR_CONFIG_DATA: LazyLock<InvarConfigData> = LazyLock::new(|| {
     }
 });
 
+static EMPTY_INVAR_STATE_DATA: LazyLock<InvarStateData> = LazyLock::new(|| {
+    let default_invar_state_data = InvarStateData::default();
+    InvarStateData {
+        props: Some(Table::new()),
+        ..default_invar_state_data
+    }
+});
+
 impl InvarConfigData {
-    pub fn new() -> InvarConfigData {
-        EMPTY_INVAR_CONFIG_DATA.clone()
+    pub fn new<IS: InvarState>(invar_state: &IS, target: Option<&String>) -> Self {
+        InvarConfigData {
+            write_mode: invar_state.write_mode_option(),
+            interpolate: invar_state.interpolate_option(),
+            executable: invar_state.executable_option(),
+            props: invar_state.props_option().clone(),
+            target: target.map(Clone::clone)
+        }
+    }
+}
+
+impl InvarStateData {
+    pub fn new() -> Self {
+        EMPTY_INVAR_STATE_DATA.clone()
     }
 }
 
@@ -50,7 +70,8 @@ mod test_invar_config_data {
 
     #[test]
     fn create_empty_invar_config_data() {
-        let empty_invar_config_data = InvarConfigData::new();
+        let empty_invar_state = InvarStateData::new();
+        let empty_invar_config_data = InvarConfigData::new(&empty_invar_state, None);
         assert_eq!(empty_invar_config_data.write_mode, None);
         assert_eq!(empty_invar_config_data.interpolate, None);
         assert_eq!(empty_invar_config_data.props, Some(Table::new()));
@@ -73,26 +94,41 @@ impl InvarConfig for InvarConfigData {
         Ok(invar_config)
     }
 
-    fn with_invar_config<I: InvarConfig>(&self, invar_config: I) -> Cow<Self> {
+    fn clone_state(&self) -> impl InvarState {
+        InvarStateData {
+            write_mode: self.write_mode.clone(),
+            executable: self.executable.clone(),
+            interpolate: self.interpolate.clone(),
+            props: self.props.clone(),
+        }
+    }
+
+    fn target(&self) -> Option<&String> {
+        self.target.as_ref()
+    }
+}
+
+impl InvarState for InvarStateData {
+    fn with_invar_state<I: InvarState>(&self, invar_state: I) -> Cow<Self> {
         let dirty = false;
-        let (write_mode, dirty) = merge_property(self.write_mode, invar_config.write_mode_option(), dirty);
+        let (write_mode, dirty) = merge_property(self.write_mode, invar_state.write_mode_option(), dirty);
         debug!("Write mode: {:?} -> {:?} ({:?})", self.write_mode, &write_mode, dirty);
-        let (executable, dirty) = merge_property(self.executable, invar_config.executable_option(), dirty);
+        let (executable, dirty) = merge_property(self.executable, invar_state.executable_option(), dirty);
         debug!("Executable: {:?} -> {:?} ({:?})", self.executable, &executable, dirty);
-        let (interpolate, dirty) = merge_property(self.interpolate, invar_config.interpolate_option(), dirty);
+        let (interpolate, dirty) = merge_property(self.interpolate, invar_state.interpolate_option(), dirty);
         debug!("Interpolate: {:?} -> {:?} ({:?})", self.interpolate, &interpolate, dirty);
-        let (props, dirty) = merge_props(&self.props, &invar_config.props_option(), dirty);
+        let (props, dirty) = merge_props(&self.props, &invar_state.props_option(), dirty);
         debug!("Props ({:?})", dirty);
         if dirty {
-            Cow::Owned(InvarConfigData { write_mode, executable, interpolate, props: Some(props.into_owned()) })
+            Cow::Owned(InvarStateData { write_mode, executable, interpolate, props: Some(props.into_owned()) })
         } else {
             Cow::Borrowed(self)
         }
     }
 
     fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self> {
-        let invar_config = InvarConfigData { write_mode, executable: None, interpolate: None, props: None };
-        self.with_invar_config(invar_config)
+        let invar_state = InvarStateData { write_mode, ..EMPTY_INVAR_STATE_DATA.clone() };
+        self.with_invar_state(invar_state)
     }
 
     fn with_write_mode(&self, write_mode: WriteMode) -> Cow<Self> {
@@ -108,8 +144,8 @@ impl InvarConfig for InvarConfigData {
     }
 
     fn with_executable_option(&self, executable: Option<bool>) -> Cow<Self> {
-        let invar_config = InvarConfigData { write_mode: None, executable, interpolate: None, props: None };
-        self.with_invar_config(invar_config)
+        let invar_state = InvarStateData { executable, ..EMPTY_INVAR_STATE_DATA.clone() };
+        self.with_invar_state(invar_state)
     }
 
     fn with_executable(&self, executable: bool) -> Cow<Self> {
@@ -125,8 +161,8 @@ impl InvarConfig for InvarConfigData {
     }
 
     fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<Self> {
-        let invar_config = InvarConfigData { write_mode: None, executable: None, interpolate, props: None };
-        self.with_invar_config(invar_config)
+        let invar_state = InvarStateData { interpolate, ..EMPTY_INVAR_STATE_DATA.clone() };
+        self.with_invar_state(invar_state)
     }
 
     fn with_interpolate(&self, interpolate: bool) -> Cow<Self> {
@@ -142,8 +178,8 @@ impl InvarConfig for InvarConfigData {
     }
 
     fn with_props_option(&self, props: Option<Table>) -> Cow<Self> {
-        let invar_config = InvarConfigData { write_mode: None, executable: None, interpolate: None, props };
-        self.with_invar_config(invar_config)
+        let invar_state = InvarStateData { props, ..EMPTY_INVAR_STATE_DATA.clone() };
+        self.with_invar_state(invar_state)
     }
 
     fn with_props(&self, props: Table) -> Cow<Self> {
@@ -221,72 +257,72 @@ mod test {
 
     #[test]
     fn with_write_mode_from_none_to_something() {
-        let invar_config = new_invar_config();
-        assert_eq!(invar_config.write_mode_option(), None);
-        let updated = invar_config.with_write_mode(Overwrite);
+        let invar_state = new_invar_state();
+        assert_eq!(invar_state.write_mode_option(), None);
+        let updated = invar_state.with_write_mode(Overwrite);
         assert_owned(&updated);
         assert_eq!(updated.write_mode_option(), Some(Overwrite));
     }
 
     #[test]
     fn with_write_mode_from_none_to_some_thing() {
-        let invar_config = new_invar_config();
-        assert_eq!(invar_config.write_mode_option(), None);
-        let updated = invar_config.with_write_mode_option(Some(Overwrite));
+        let invar_state = new_invar_state();
+        assert_eq!(invar_state.write_mode_option(), None);
+        let updated = invar_state.with_write_mode_option(Some(Overwrite));
         assert_owned(&updated);
         assert_eq!(updated.write_mode_option(), Some(Overwrite));
     }
 
     #[test]
     fn with_write_mode_from_none_to_none() {
-        let invar_config = new_invar_config();
-        assert_eq!(invar_config.write_mode_option(), None);
-        let updated = invar_config.with_write_mode_option(None);
+        let invar_state = new_invar_state();
+        assert_eq!(invar_state.write_mode_option(), None);
+        let updated = invar_state.with_write_mode_option(None);
         assert_borrowed(&updated);
         assert_eq!(updated.write_mode_option(), None);
     }
 
     #[test]
     fn with_write_mode_from_something_to_something_same() {
-        let invar_config = new_invar_config().with_write_mode(Ignore).into_owned();
-        assert_eq!(invar_config.write_mode_option(), Some(Ignore));
-        let updated = invar_config.with_write_mode(Ignore);
+        let invar_state = new_invar_state().with_write_mode(Ignore).into_owned();
+        assert_eq!(invar_state.write_mode_option(), Some(Ignore));
+        let updated = invar_state.with_write_mode(Ignore);
         assert_borrowed(&updated);
         assert_eq!(updated.write_mode_option(), Some(Ignore));
     }
 
     #[test]
     fn with_write_mode_from_something_to_some_thing_same() {
-        let invar_config = new_invar_config().with_write_mode(Ignore).into_owned();
-        assert_eq!(invar_config.write_mode_option(), Some(Ignore));
-        let updated = invar_config.with_write_mode_option(Some(Ignore));
+        let invar_state = new_invar_state().with_write_mode(Ignore).into_owned();
+        assert_eq!(invar_state.write_mode_option(), Some(Ignore));
+        let updated = invar_state.with_write_mode_option(Some(Ignore));
         assert_borrowed(&updated);
         assert_eq!(updated.write_mode_option(), Some(Ignore));
     }
 
     #[test]
     fn with_write_mode_from_something_to_something_different() {
-        let invar_config = new_invar_config().with_write_mode(Ignore).into_owned();
-        assert_eq!(invar_config.write_mode_option(), Some(Ignore));
-        let updated = invar_config.with_write_mode(Overwrite);
+        let invar_state = new_invar_state().with_write_mode(Ignore).into_owned();
+        assert_eq!(invar_state.write_mode_option(), Some(Ignore));
+        let updated = invar_state.with_write_mode(Overwrite);
         assert_owned(&updated);
         assert_eq!(updated.write_mode_option(), Some(Overwrite));
     }
 
     #[test]
     fn with_write_mode_from_something_to_some_thing_different() {
-        let invar_config = new_invar_config().with_write_mode(Ignore).into_owned();
-        assert_eq!(invar_config.write_mode_option(), Some(Ignore));
-        let updated = invar_config.with_write_mode_option(Some(Overwrite));
+        let invar_state = new_invar_state().with_write_mode(Ignore).into_owned();
+        assert_eq!(invar_state.write_mode_option(), Some(Ignore));
+        let updated = invar_state.with_write_mode_option(Some(Overwrite));
         assert_owned(&updated);
         assert_eq!(updated.write_mode_option(), Some(Overwrite));
     }
 
     #[test]
     fn with_write_mode_from_something_to_none() {
-        let invar_config = new_invar_config().with_write_mode(Ignore).into_owned();
-        assert_eq!(invar_config.write_mode_option(), Some(Ignore));
-        let updated = invar_config.with_write_mode_option(None);
+        let invar_state = new_invar_state().with_write_mode(Ignore).into_owned();
+        assert_eq!(invar_state.write_mode_option(), Some(Ignore));
+        let updated = invar_state.with_write_mode_option(None);
         assert_borrowed(&updated);
         assert_eq!(updated.write_mode_option(), Some(Ignore)); // Old value unchanged
     }
@@ -295,72 +331,72 @@ mod test {
 
     #[test]
     fn with_interpolate_from_none_to_something() {
-        let invar_config = new_invar_config();
-        assert_eq!(invar_config.interpolate_option(), None);
-        let updated = invar_config.with_interpolate(false);
+        let invar_state = new_invar_state();
+        assert_eq!(invar_state.interpolate_option(), None);
+        let updated = invar_state.with_interpolate(false);
         assert_owned(&updated);
         assert_eq!(updated.interpolate_option(), Some(false));
     }
 
     #[test]
     fn with_interpolate_from_none_to_some_thing() {
-        let invar_config = new_invar_config();
-        assert_eq!(invar_config.interpolate_option(), None);
-        let updated = invar_config.with_interpolate_option(Some(false));
+        let invar_state = new_invar_state();
+        assert_eq!(invar_state.interpolate_option(), None);
+        let updated = invar_state.with_interpolate_option(Some(false));
         assert_owned(&updated);
         assert_eq!(updated.interpolate_option(), Some(false));
     }
 
     #[test]
     fn with_interpolate_from_none_to_none() {
-        let invar_config = new_invar_config();
-        assert_eq!(invar_config.interpolate_option(), None);
-        let updated = invar_config.with_interpolate_option(None);
+        let invar_state = new_invar_state();
+        assert_eq!(invar_state.interpolate_option(), None);
+        let updated = invar_state.with_interpolate_option(None);
         assert_borrowed(&updated);
         assert_eq!(updated.interpolate_option(), None);
     }
 
     #[test]
     fn with_interpolate_from_something_to_something_same() {
-        let invar_config = new_invar_config().with_interpolate(false).into_owned();
-        assert_eq!(invar_config.interpolate_option(), Some(false));
-        let updated = invar_config.with_interpolate(false);
+        let invar_state = new_invar_state().with_interpolate(false).into_owned();
+        assert_eq!(invar_state.interpolate_option(), Some(false));
+        let updated = invar_state.with_interpolate(false);
         assert_borrowed(&updated);
         assert_eq!(updated.interpolate_option(), Some(false));
     }
 
     #[test]
     fn with_interpolate_from_something_to_some_thing_same() {
-        let invar_config = new_invar_config().with_interpolate(false).into_owned();
-        assert_eq!(invar_config.interpolate_option(), Some(false));
-        let updated = invar_config.with_interpolate_option(Some(false));
+        let invar_state = new_invar_state().with_interpolate(false).into_owned();
+        assert_eq!(invar_state.interpolate_option(), Some(false));
+        let updated = invar_state.with_interpolate_option(Some(false));
         assert_borrowed(&updated);
         assert_eq!(updated.interpolate_option(), Some(false));
     }
 
     #[test]
     fn with_interpolate_from_something_to_something_different() {
-        let invar_config = new_invar_config().with_interpolate(false).into_owned();
-        assert_eq!(invar_config.interpolate_option(), Some(false));
-        let updated = invar_config.with_interpolate(true);
+        let invar_state = new_invar_state().with_interpolate(false).into_owned();
+        assert_eq!(invar_state.interpolate_option(), Some(false));
+        let updated = invar_state.with_interpolate(true);
         assert_owned(&updated);
         assert_eq!(updated.interpolate_option(), Some(true));
     }
 
     #[test]
     fn with_interpolate_from_something_to_some_thing_different() {
-        let invar_config = new_invar_config().with_interpolate(false).into_owned();
-        assert_eq!(invar_config.interpolate_option(), Some(false));
-        let updated = invar_config.with_interpolate_option(Some(true));
+        let invar_state = new_invar_state().with_interpolate(false).into_owned();
+        assert_eq!(invar_state.interpolate_option(), Some(false));
+        let updated = invar_state.with_interpolate_option(Some(true));
         assert_owned(&updated);
         assert_eq!(updated.interpolate_option(), Some(true));
     }
 
     #[test]
     fn with_interpolate_from_something_to_none() {
-        let invar_config = new_invar_config().with_interpolate(false).into_owned();
-        assert_eq!(invar_config.interpolate_option(), Some(false));
-        let updated = invar_config.with_interpolate_option(None);
+        let invar_state = new_invar_state().with_interpolate(false).into_owned();
+        assert_eq!(invar_state.interpolate_option(), Some(false));
+        let updated = invar_state.with_interpolate_option(None);
         assert_borrowed(&updated);
         assert_eq!(updated.interpolate_option(), Some(false)); // Old value unchanged
     }
@@ -369,20 +405,20 @@ mod test {
 
     #[test]
     fn with_props_from_none_to_something() {
-        let invar_config = empty_invar_config();
+        let invar_state = new_invar_state();
         let mut mapping = Table::new();
         insert_entry(&mut mapping, "foo", "bar");
-        let updated = invar_config.with_props(mapping.clone());
+        let updated = invar_state.with_props(mapping.clone());
         assert_owned(&updated);
         assert_eq!(updated.props_option(), &Some(mapping));
     }
 
     #[test]
     fn with_props_from_none_to_some_thing() {
-        let invar_config = empty_invar_config();
+        let invar_state = new_invar_state();
         let mut mapping = Table::new();
         insert_entry(&mut mapping, "foo", "bar");
-        let updated = invar_config.with_props_option(Some(mapping.clone()));
+        let updated = invar_state.with_props_option(Some(mapping.clone()));
         assert_owned(&updated);
         assert_eq!(updated.props_option(), &Some(mapping));
     }
@@ -390,13 +426,13 @@ mod test {
     #[test]
     fn with_props_from_none_to_none() {
         // Given
-        let invar_config = empty_invar_config();
+        let invar_state = new_invar_state();
 
         // When
-        let updated = invar_config.with_props_option(None);
+        let updated = invar_state.with_props_option(None);
 
         // Then
-        assert_owned(&updated);
+        assert_borrowed(&updated);
         assert_eq!(updated.props_option(), &Some(Table::new()));
     }
 
@@ -407,7 +443,7 @@ mod test {
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
-        let invar_config = new_invar_config().with_props(old_mapping.clone()).into_owned();
+        let invar_config = new_invar_state().with_props(old_mapping.clone()).into_owned();
         let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "foo", "bar");
 
@@ -426,12 +462,12 @@ mod test {
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
-        let invar_config = new_invar_config().with_props(old_mapping.clone()).into_owned();
+        let invar_state = new_invar_state().with_props(old_mapping.clone()).into_owned();
         let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "foo", "beep");
 
         // When
-        let updated = invar_config.with_props(new_mapping.clone());
+        let updated = invar_state.with_props(new_mapping.clone());
 
         // Then
         let mut updated_mapping = old_mapping.clone();
@@ -447,12 +483,12 @@ mod test {
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
-        let invar_config = new_invar_config().with_props(old_mapping.clone()).into_owned();
+        let invar_state = new_invar_state().with_props(old_mapping.clone()).into_owned();
         let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "oh", "joy");
 
         // When
-        let updated = invar_config.with_props(new_mapping.clone());
+        let updated = invar_state.with_props(new_mapping.clone());
 
         // Then
         let mut updated_mapping = old_mapping.clone();
@@ -467,10 +503,10 @@ mod test {
         let mut mapping = Table::new();
         insert_entry(&mut mapping, "foo", "bar");
         insert_entry(&mut mapping, "food", "baz");
-        let invar_config = new_invar_config().with_props(mapping).into_owned();
+        let invar_state = new_invar_state().with_props(mapping).into_owned();
 
         // When
-        let string_props = invar_config.string_props();
+        let string_props = invar_state.string_props();
 
         // Then
         let mut expected = AHashMap::new();
@@ -481,15 +517,12 @@ mod test {
 
     // Utility functions
 
-    fn empty_invar_config() -> impl InvarConfig {
-        InvarConfigData { write_mode: None, executable: None, interpolate: None, props: None }
+
+    fn new_invar_state() -> impl InvarState {
+        InvarStateData::new()
     }
 
-    fn new_invar_config() -> impl InvarConfig {
-        InvarConfigData::new()
-    }
-
-    fn assert_owned(invar_config: &Cow<impl InvarConfig>) {
+    fn assert_owned(invar_config: &Cow<impl InvarState>) {
         if let Cow::Owned(_) = invar_config {
             return;
         } else {
@@ -497,7 +530,7 @@ mod test {
         }
     }
 
-    fn assert_borrowed(invar_config: &Cow<impl InvarConfig>) {
+    fn assert_borrowed(invar_config: &Cow<impl InvarState>) {
         if let Cow::Borrowed(_) = invar_config {
             return;
         } else {
