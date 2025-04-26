@@ -1,5 +1,6 @@
 use crate::config_model::invar_config::*;
 use std::borrow::Cow;
+use std::sync::LazyLock;
 use ahash::AHashMap;
 use anyhow::Result;
 use log::debug;
@@ -7,18 +8,39 @@ use serde::{Deserialize, Serialize};
 use toml::{Table, Value};
 use crate::file_system::ConfigFormat;
 
-#[derive(Deserialize,Serialize,Debug,Clone)]
-#[serde(rename_all = "kebab-case")]
-pub struct InvarConfigData {
-    write_mode: Option<WriteMode>,
-    executable: Option<bool>,
-    interpolate: Option<bool>,
-    props: Option<Table>,
+macro_rules! invar_struct {
+    ($v:vis $name:ident $([$($derive:ident),+])? { $($x:ident : $y:ty),* $(,)? }) => {
+        #[derive(Deserialize,Serialize,Debug,Clone$($(,$derive)+)?)]
+        #[serde(rename_all = "kebab-case")]
+        $v struct $name {
+            write_mode: Option<WriteMode>,
+            executable: Option<bool>,
+            interpolate: Option<bool>,
+            props: Option<Table>,
+            $(
+            $x: $y
+            ),*
+        }
+    };
 }
+
+invar_struct! [pub InvarConfigData[Default] {
+//    target: Option<String>
+}];
+
+invar_struct! [pub InvarConfigState {}];
+
+static EMPTY_INVAR_CONFIG_DATA: LazyLock<InvarConfigData> = LazyLock::new(|| {
+    let default_invar_config_data = InvarConfigData::default();
+    InvarConfigData {
+        props: Some(Table::new()),
+        ..default_invar_config_data
+    }
+});
 
 impl InvarConfigData {
     pub fn new() -> InvarConfigData {
-        InvarConfigData { write_mode: None, executable: None, interpolate: None, props: Some(Table::new()) }
+        EMPTY_INVAR_CONFIG_DATA.clone()
     }
 }
 
@@ -32,12 +54,6 @@ mod test_invar_config_data {
         assert_eq!(empty_invar_config_data.write_mode, None);
         assert_eq!(empty_invar_config_data.interpolate, None);
         assert_eq!(empty_invar_config_data.props, Some(Table::new()));
-    }
-}
-
-impl Default for InvarConfigData {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
