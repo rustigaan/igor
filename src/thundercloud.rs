@@ -240,7 +240,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         let mut bolts = bolts;
         let mut use_config = Cow::Borrowed(invar_config);
         if let Some(dir_bolts) = bolts.remove(".") {
-            let (_, dir_bolt_list) = self.combine_and_filter_bolt_lists(&dir_bolts.0, &dir_bolts.1);
+            let dir_bolt_list = combine_bolt_lists(&dir_bolts.0, &dir_bolts.1);
             use_config = self.update_invar_config(invar_config, &dir_bolt_list).await?;
         }
         let bolts = bolts;
