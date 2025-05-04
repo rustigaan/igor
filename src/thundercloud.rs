@@ -35,10 +35,15 @@ async fn process_niche_in_context<T: ThunderConfig>(generation_context: &Generat
     let current_directory = RelativePath::from(".");
     let default_invar_config = config.invar_defaults();
     let default_invar_state = default_invar_config.clone_state();
-    let invar_defaults = generation_context.0.default_invar_config().clone_state();
+    let generation_default_invar_config = generation_context.0.default_invar_config();
+    let invar_defaults = generation_default_invar_config.clone_state();
+    let target = generation_default_invar_config
+        .target().or_else(|| default_invar_config.target())
+        .map(String::clone).map(RelativePath::from).unwrap_or_else(|| current_directory.clone());
+    let target = RelativePath::from(target);
     let invar_state = default_invar_state.with_invar_state(invar_defaults);
     debug!("String properties: {:?}", invar_state.string_props());
-    generation_context.visit_subtree(&current_directory, FromBothCumulusAndInvar, invar_state.as_ref()).await?;
+    generation_context.visit_subtree(&current_directory, &target, FromBothCumulusAndInvar, invar_state.as_ref()).await?;
     Ok(())
 }
 
@@ -213,49 +218,64 @@ impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
 struct GenerationContext<TC: ThunderConfig>(TC);
 
 impl<TC: ThunderConfig> GenerationContext<TC> {
-    async fn visit_subtree<IS: InvarState>(&self, directory: &RelativePath, thumbs: Thumbs, invar_config: &IS) -> Result<()> {
+    async fn visit_subtree<IS: InvarState>(&self, source_dir: &RelativePath, target_dir: &RelativePath, thumbs: Thumbs, invar_config: &IS) -> Result<()> {
         let cumulus_directory_location = CumulusDirectoryLocation(self.0.thundercloud_file_system().clone());
         let (cumulus_bolts, cumulus_subdirectories) =
-            self.try_visit_directory(thumbs.visit_cumulus(), &cumulus_directory_location, directory).await?;
+            self.try_visit_directory(thumbs.visit_cumulus(), &cumulus_directory_location, source_dir).await?;
         let invar_directory_location = InvarDirectoryLocation(self.0.project_file_system().clone());
         let (invar_bolts, invar_subdirectories) =
-            self.try_visit_directory(thumbs.visit_invar(), &invar_directory_location, directory).await?;
+            self.try_visit_directory(thumbs.visit_invar(), &invar_directory_location, source_dir).await?;
 
         let bolts = combine(cumulus_bolts, invar_bolts);
         for (key, bolt_lists) in &bolts {
             debug!("Bolts entry: {:?}: {:?}", key, bolt_lists);
         }
 
-        self.generate_files(&directory, bolts, invar_config).await?;
+        let new_target_option = self.generate_files(target_dir, bolts, invar_config).await?;
+        let target_dir = new_target_option.as_ref().unwrap_or(target_dir);
 
-        self.visit_subdirectories(directory, cumulus_subdirectories, invar_subdirectories, invar_config).await?;
+        self.visit_subdirectories(source_dir, target_dir, cumulus_subdirectories, invar_subdirectories, invar_config).await?;
 
         Ok(())
     }
 
-    async fn generate_files<IS: InvarState>(&self, directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>, Vec<Bolt>)>, invar_config: &IS) -> Result<()> {
+    async fn generate_files<IS: InvarState>(&self, directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>, Vec<Bolt>)>, invar_config: &IS) -> Result<Option<RelativePath>> {
+        let mut new_target_dir = None;
         let mut bolts = bolts;
         let mut use_config = Cow::Borrowed(invar_config);
+        let mut use_target = Cow::Borrowed(directory);
         if let Some(dir_bolts) = bolts.remove(".") {
             let dir_bolt_list = combine_bolt_lists(&dir_bolts.0, &dir_bolts.1);
-            use_config = self.update_invar_config(invar_config, &dir_bolt_list).await?;
+            let (updated_config, target_dir) = self.update_invar_config(invar_config, &dir_bolt_list).await?;
+            use_config = updated_config;
+            if let Some(target_dir) = target_dir {
+                let mut new_target = RelativePath::from(directory.clone().parent().unwrap_or(directory).to_path_buf());
+                let interpolated_target = interpolate(&target_dir, use_config.as_ref());
+                new_target.push(RelativePath::from(interpolated_target));
+                use_target = Cow::Owned(new_target.clone());
+                new_target_dir = Some(new_target);
+            }
         }
+        let use_config = use_config; // No longer mutable
+        let use_target = use_target; // No longer mutable
         let bolts = bolts;
 
-        let target_directory = directory.relative_to(self.0.project_root());
+        let target_directory = use_target.relative_to(self.0.project_root());
         debug!("Generate files in {:?} with config {:?}", &target_directory, &use_config);
         for (name, bolt_lists) in &bolts {
             if ILLEGAL_FILE_REGEX.is_match(name) {
                 warn!("Target filename is not legal: {name:?}");
                 continue;
             }
-            let target_file = RelativePath::from(name as &str).relative_to(&target_directory);
             let half_config = self.update_invar_config(use_config.as_ref(), &bolt_lists.0).await?;
-            let whole_config = self.update_invar_config(half_config.as_ref(), &bolt_lists.1).await?;
+            let whole_config = self.update_invar_config(half_config.0.as_ref(), &bolt_lists.1).await?;
             let (option, bolts) = self.combine_and_filter_bolt_lists(&bolt_lists.0, &bolt_lists.1);
-            self.generate_file(&target_file, option, bolts, whole_config.as_ref()).await?;
+            let target = half_config.1.or(whole_config.1).unwrap_or_else(|| name.to_string());
+            let interpolated_target = interpolate(&target, whole_config.0.as_ref());
+            let target_file = RelativePath::from(interpolated_target).relative_to(&target_directory);
+            self.generate_file(&target_file, option, bolts, whole_config.0.as_ref()).await?;
         }
-        Ok(())
+        Ok(new_target_dir)
     }
 
     async fn generate_file<IS: InvarState>(&self, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IS) -> Result<()> {
@@ -403,11 +423,12 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn update_invar_config<'a, IS>(&self, invar_config: &'a IS, bolts: &Vec<Bolt>) -> Result<Cow<'a, IS>>
+    async fn update_invar_config<'a, IS>(&self, invar_config: &'a IS, bolts: &Vec<Bolt>) -> Result<(Cow<'a, IS>, Option<String>)>
     where
         IS: InvarState,
     {
         let mut use_config = Cow::Borrowed(invar_config);
+        let mut target = None;
         for bolt in bolts {
             debug!("Bolt kind: {:?}", bolt.kind_name());
             if let BoltKind::Config { format } = bolt.kind {
@@ -419,6 +440,9 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                     Project => project_fs.get_content(bolt.source().clone()).await?,
                 };
                 let bolt_invar_config = get_invar_config(&bolt_invar_config_body, format)?;
+                if let Some(bolt_target) = bolt_invar_config.target() {
+                    target = Some(bolt_target.clone());
+                }
                 let bolt_invar_state = bolt_invar_config.clone_state();
                 debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
                 let new_use_config = use_config.to_owned().with_invar_state(bolt_invar_state).into_owned();
@@ -426,7 +450,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             }
         }
         debug!("Updated invar config: {:?}", use_config);
-        Ok(use_config)
+        Ok((use_config, target))
     }
 
     fn combine_and_filter_bolt_lists(&self, cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>) -> (Option<Bolt>, Vec<Bolt>) {
@@ -459,7 +483,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         (first_option, fragments)
     }
 
-    async fn visit_subdirectories<IS>(&self, directory: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, invar_config: &IS) -> Result<()>
+    async fn visit_subdirectories<IS>(&self, source_dir: &RelativePath, target_dir: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, invar_config: &IS) -> Result<()>
     where
         TC: ThunderConfig,
         IS: InvarState
@@ -472,16 +496,21 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             } else {
                 FromCumulus
             };
-            let mut subdirectory = directory.clone();
             let path: RelativePath = path.try_into()?;
-            subdirectory.push(path);
-            Box::pin(self.visit_subtree(&subdirectory, subdirectory_thumbs, invar_config)).await?;
+            let mut source_subdir = source_dir.clone();
+            source_subdir.push(path.clone());
+            let mut target_subdir = target_dir.clone();
+            target_subdir.push(path);
+            
+            Box::pin(self.visit_subtree(&source_subdir, &target_subdir, subdirectory_thumbs, invar_config)).await?;
         }
         for path in invar_subdirectories {
-            let mut subdirectory = directory.clone();
             let path: RelativePath = path.try_into()?;
-            subdirectory.push(path);
-            Box::pin(self.visit_subtree(&subdirectory, FromInvar, invar_config)).await?;
+            let mut source_subdir = source_dir.clone();
+            source_subdir.push(path.clone());
+            let mut target_subdir = target_dir.clone();
+            target_subdir.push(path);
+            Box::pin(self.visit_subtree(&source_subdir, &target_subdir, FromInvar, invar_config)).await?;
         }
         Ok(())
     }
@@ -787,10 +816,18 @@ mod test {
             "CargoCult.toml" = '''
             [[psychotropic.cues]]
             name = "example"
-            use-thundercloud = { directory = "{{PROJECT}}/example-thundercloud", on-incoming = "Update", features = ["glass", "bash_config", "kermie"], invar-defaults = { props = { marthter = "Jeremy", buyer = "Myra LeJean", milk-man = "Kaos" } } }
+            use-thundercloud = { directory = "{{PROJECT}}/example-thundercloud", on-incoming = "Update", features = ["glass", "bash_config", "kermie"], invar-defaults = { props = { marthter = "Jeremy", buyer = "Myra LeJean", milk-man = "Kaos" }, target = "bad-schuschein" } }
             '''
 
+            [yeth-marthter.example.invar]
+            "dot_+config-@.toml" = """
+            target = "Ankh-Morpork"
+            """
+
             [yeth-marthter.example.invar.workshop]
+            "dot_+config-@.toml" = """
+            target = "{{marthter}}"
+            """
             "clock+config-glass.yaml.toml" = """
             write-mode = "Overwrite"
 
@@ -811,7 +848,7 @@ mod test {
         "#};
 
         // When
-        let result_file_path = to_absolute_path("/workshop/clock.yaml");
+        let result_file_path = to_absolute_path("/Ankh-Morpork/Jeremy/clock.yaml");
         let result_body = test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
 
         // Then

@@ -116,6 +116,7 @@ This is an example invar configuration file:
 ```toml
 write-mode = "WriteNew"
 interpolate = true
+target = "properties-{{key}}.toml"
 
 [props]
 key = "value"
@@ -126,6 +127,8 @@ Write-mode `Overwrite` is the default: the option from the thundercloud or invar
 Write-mode `WriteNew` will create a new file if it didn't exist, but it will not overwrite an existing file.
 
 Write-mode `Ignore` will completely ignore this option.
+
+The target will replace the name of the file (in the case of `dot_+config-@.toml` the target replaces the name of the directory). This property is a relative path and may include subdirectories.
 
 Setting interpolate to `false` will suppress interpolation of properties. Normally, occurrences of `{{property_name}}` will be replaced by the value of the property. This is called interpolation.
 
