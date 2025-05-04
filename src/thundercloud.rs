@@ -820,12 +820,12 @@ mod test {
             '''
 
             [yeth-marthter.example.invar]
-            "dot_+config-@.toml" = """
+            "dot_+config.toml" = """
             target = "Ankh-Morpork"
             """
 
             [yeth-marthter.example.invar.workshop]
-            "dot_+config-@.toml" = """
+            "dot_+config.toml" = """
             target = "{{marthter}}"
             """
             "clock+config-glass.yaml.toml" = """
