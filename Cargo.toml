@@ -8,7 +8,6 @@ readme = "README.md"
 homepage = "https://github.com/rustigaan/igor"
 repository = "https://github.com/rustigaan/igor"
 license = "MIT"
-license-file = "LICENSE"
 
 [dependencies]
 ahash = "^0.8.11"
