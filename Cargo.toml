@@ -1,9 +1,14 @@
 [package]
 name = "igor"
+description = "Generic text-based vendoring"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Jeroen van Maanen"]
+readme = "README.md"
+homepage = "https://github.com/rustigaan/igor"
+repository = "https://github.com/rustigaan/igor"
+license = "MIT"
+license-file = "LICENSE"
 
 [dependencies]
 ahash = "^0.8.11"
