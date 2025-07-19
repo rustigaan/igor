@@ -2,7 +2,21 @@
 
 The Igor vendoring tool offers generic vendoring of common fragments of text files that allow comments.
 
-This tool is named after a character that appears in several Diskworld novels (my favorite is "Thief of Time"). This character offers a nice metaphor for what this tool tries to provide.
+## Installation
+
+```sh
+cargo install igor
+```
+
+This installs `cargo` subcommand `cult`, which can be run as
+
+```sh
+cargo cult
+```
+
+## Description
+
+This tool is named after a character that appears in several [Diskworld](https://en.wikipedia.org/wiki/Discworld) novels (my favorite is "Thief of Time"). This character offers a nice metaphor for what this tool tries to provide.
 An Igor is an assistant who fills a niche. He uses time-tried solutions (like a good jolt of electricity obtained from a lightning bolt) to make his masters project come alive. There are many Igors, but they are quite interchangeable, so they all use the same name.
 Every Igor has had (and has executed) many surgeries, has many visible scars and talks with a lisp. He isn't pretty, but he does the job.
 
