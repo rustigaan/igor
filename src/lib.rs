@@ -1,3 +1,4 @@
+use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 use ahash::AHashMap;
@@ -18,6 +19,7 @@ use crate::file_system::{ConfigFormat, FileSystem, PathType};
 use crate::niche::process_niche;
 use crate::path::AbsolutePath;
 
+/// Generic text-based vendoring
 #[derive(Parser,Debug)]
 #[command(version, about, long_about = None)]
 struct Arguments {
@@ -32,7 +34,17 @@ struct Arguments {
 
 pub async fn igor() -> Result<()> {
     info!("Igor started");
-    let arguments = Arguments::parse();
+    let mut cult_arguments = None;
+    let mut args = env::args().peekable();
+    args.next(); // Skip the command
+    debug!("Args: {:?}", args);
+    if let Some(first_arg) = args.peek() {
+        debug!("First argument: {:?}", first_arg);
+        if first_arg == "cult" {
+            cult_arguments = Some(Arguments::parse_from(args));
+        }
+    }
+    let arguments = cult_arguments.unwrap_or_else(Arguments::parse);
 
     let fs = file_system::real_file_system();
     application(arguments.project_root, &fs).await
