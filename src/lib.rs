@@ -4,7 +4,7 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use anyhow::Result;
 use clap::Parser;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 mod config_model;
@@ -100,7 +100,7 @@ pub async fn application<FS: FileSystem + 'static>(project_root_option: Option<P
     };
 
     let project_context = Arc::new(project_context_data);
-    info!("Project context: {project_context:?}");
+    debug!("Project context: {project_context:?}");
 
     let mut handles = Vec::new();
     let permits = 5;
@@ -265,12 +265,14 @@ async fn run_process_niche<FS: FileSystem, PC: ProjectConfig>(project_root: Abso
         let niches_directory = project_config.niches_directory();
         process_niche(project_root, niches_directory, niche.clone(), use_thundercloud.clone(), project_config.invar_defaults().into_owned(), niche_fs, project_context.target_directory.clone()).await
     } else {
-        warn!("Niche not found: {:?}", &niche);
+        if !niche.to_str().starts_with("#") {
+            warn!("Niche not found: {:?}", &niche);
+        }
         Ok(())
     };
     debug!("Send done: {:?}", &niche);
     tx_done.send(niche.clone()).await?;
-    debug!("Done sent: {:?}", &niche);
+    trace!("Done sent: {:?}", &niche);
     result
 }
 

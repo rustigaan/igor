@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use log::debug;
+use log::trace;
 use once_cell::sync::{Lazy};
 use regex::Regex;
 use toml::{Table, Value};
@@ -14,11 +14,11 @@ pub fn interpolate<'a>(source: &'a str, variables: &Table) -> Cow<'a, str> {
         return result;
     }
     if let Some(captures) = PLACEHOLDER_REGEX.captures(result.as_ref()) {
-        debug!("Interpolate: capture: {:?}", captures.get(0));
+        trace!("Interpolate: capture: {:?}", captures.get(0));
         if let (Some(match_placeholder), Some(match_name)) = (captures.get(0), captures.get(1)) {
-            debug!("Interpolate: placeholder name: '{}'", match_name.as_str());
+            trace!("Interpolate: placeholder name: '{}'", match_name.as_str());
             if let Some(value) = variables.get(match_name.as_str()).and_then(Value::as_str) {
-                debug!("Interpolate: '{}' to '{}' in: {}", match_placeholder.as_str(), value, result);
+                trace!("Interpolate: '{}' to '{}' in: {}", match_placeholder.as_str(), value, result);
                 let range = match_placeholder.range();
                 result.to_mut().replace_range(range, value);
             }

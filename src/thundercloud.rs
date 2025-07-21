@@ -534,6 +534,10 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         let mut bolts = AHashMap::new();
         let mut subdirectories = AHashSet::new();
         let file_system = directory_location.file_system();
+        if file_system.path_type(directory).await != PathType::Directory {
+            debug!("Ignoring directory {:?}", directory);
+            return Ok((bolts, subdirectories));
+        }
         let entries = file_system.read_dir(directory).await
             .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
         let mut entries = pin!(entries);
@@ -640,7 +644,7 @@ fn is_matching_end(captures: &Captures, feature: &str, qualifier: &str) -> bool 
 }
 
 async fn send_to_writer<TF: TargetFile>(line: &str, target_file: &TF) -> Result<()> {
-    debug!("Send to writer: {:?}", &line);
+    trace!("Send to writer: {:?}", &line);
     target_file.write_line(line).await?;
     Ok(())
 }

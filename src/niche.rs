@@ -25,7 +25,7 @@ pub async fn process_niche<UT: UseThundercloudConfig, FS: FileSystem, IC: InvarC
 
     let thundercloud_directory = get_thundercloud_directory(&project_root, &niche, &use_thundercloud, &fs, target_dir).await?;
     if let (Some(thundercloud_directory), use_fs) = thundercloud_directory {
-        info!("Thundercloud directory: {thundercloud_directory:?}");
+        info!("Thundercloud directory: {niche:?}: {thundercloud_directory:?}");
 
         match use_fs {
             RealFs => {
@@ -71,10 +71,10 @@ async fn get_thundercloud_directory<UT: UseThundercloudConfig + Send + Sync, FS:
         let current_dir = AbsolutePath::current_dir()?;
         let thundercloud_directory = AbsolutePath::new(directory.to_string(), &current_dir);
         if fs.path_type(&thundercloud_directory).await == Directory {
-            info!("Thundercloud directory: {niche:?}: {directory:?}");
+            debug!("Thundercloud directory: {niche:?}: {directory:?}");
             return Ok((Some(thundercloud_directory.to_owned()), ProjectFs))
         } else {
-            info!("Not found: Directory: {niche:?}: {directory:?}. Try Git");
+            debug!("Not found: Directory: {niche:?}: {directory:?}. Try Git");
         }
     }
     if let Some(git_remote) = use_thundercloud.git_remote() {

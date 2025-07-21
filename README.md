@@ -8,7 +8,7 @@ The Igor vendoring tool offers generic vendoring of common fragments of text fil
 cargo install igor
 ```
 
-This installs `cargo` subcommand `cult`, which can be run as
+This installs binary `igor` as well as `cargo` subcommand `cult`, which can be run as
 
 ```sh
 cargo cult
