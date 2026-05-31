@@ -1,6 +1,3 @@
-use std::borrow::Cow;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use crate::config_model::invar_config::invar_config_or_default;
 use crate::config_model::invar_config_data::InvarConfigData;
 use crate::config_model::project_config::ProjectConfig;
@@ -9,8 +6,11 @@ use crate::config_model::psychotropic_data;
 use crate::config_model::psychotropic_data::{data_to_index, PsychotropicConfigData};
 use crate::file_system::ConfigFormat;
 use crate::path::RelativePath;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Deserialize, Serialize, Debug,Default)]
+#[derive(Deserialize, Serialize, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct ProjectConfigData {
     niches_directory: Option<String>,
@@ -48,7 +48,7 @@ impl ProjectConfig for ProjectConfigData {
         }
     }
 
-    fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl> {
-        invar_config_or_default(&self.invar_defaults)
+    fn invar_defaults<'a>(&'a self) -> Cow<'a, Self::InvarConfigImpl> {
+        invar_config_or_default(self.invar_defaults.as_ref())
     }
 }

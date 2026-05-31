@@ -2,28 +2,33 @@ use super::*;
 
 use crate::config_model::thundercloud_config_data::ThundercloudConfigData;
 use crate::file_system::ConfigFormat;
+use crate::NicheName;
 
-pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<impl ThundercloudConfig> {
+pub fn from_str(body: &str, config_format: ConfigFormat) -> Result<ThundercloudConfigData> {
     ThundercloudConfigData::from_str(body, config_format)
 }
 
-pub trait ThundercloudConfig : Debug + Sized {
-    type InvarConfigImpl : InvarConfig;
+pub fn from_niche(niche: &NicheName) -> ThundercloudConfigData {
+    ThundercloudConfigData::from(niche)
+}
+
+pub trait ThundercloudConfig: Debug + Sized {
+    type InvarConfigImpl: InvarConfig;
     fn from_str(toml_data: &str, config_format: ConfigFormat) -> Result<Self>;
     fn niche(&self) -> &impl NicheDescription;
-    fn invar_defaults(&self) -> Cow<Self::InvarConfigImpl>;
+    fn invar_defaults<'a>(&'a self) -> Cow<'a, Self::InvarConfigImpl>;
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::config_model::serde_test_utils::insert_entry;
+    use crate::config_model::WriteMode::Overwrite;
     use anyhow::Result;
     use indoc::indoc;
     use log::debug;
     use test_log::test;
     use toml::Table;
-    use crate::config_model::serde_test_utils::insert_entry;
-    use crate::config_model::WriteMode::Overwrite;
 
     #[test]
     fn test_from_str() -> Result<()> {
@@ -48,7 +53,10 @@ mod test {
 
         // Then
         assert_eq!(thundercloud_config.niche().name(), "example");
-        assert_eq!(thundercloud_config.niche().description(), Some("Example thundercloud"));
+        assert_eq!(
+            thundercloud_config.niche().description(),
+            Some("Example thundercloud")
+        );
         let invar_defaults = thundercloud_config.invar_defaults().into_owned();
         let invar_defaults_state = invar_defaults.clone_state();
         assert_eq!(invar_defaults_state.write_mode(), Overwrite);

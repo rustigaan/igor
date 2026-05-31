@@ -1,74 +1,115 @@
+use crate::config_model::UseThundercloudConfig;
+use crate::config_model::{
+    invar_config, thundercloud_config, InvarConfig, InvarState, NicheDescription, ThunderConfig,
+    ThundercloudConfig, WriteMode,
+};
+use crate::file_system::{
+    source_file_to_string, ConfigFormat, DirEntry, FileSystem, PathType, SourceFile, TargetFile,
+};
+use crate::path::{AbsolutePath, RelativePath, SingleComponent};
+use crate::thundercloud::DirectoryContext::{Project, ThunderCloud};
+use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
+use crate::NicheName;
 use ahash::{AHashMap, AHashSet};
 use anyhow::{anyhow, bail, Result};
+use log::{debug, info, trace, warn};
+use once_cell::sync::Lazy;
+use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::hash::Hash;
 use std::ops::Add;
 use std::path::Path;
 use std::pin::pin;
-use log::{debug, info, trace, warn};
-use once_cell::sync::Lazy;
-use regex::{Captures, Regex};
 use tokio_stream::StreamExt;
-use crate::config_model::{invar_config, InvarConfig, InvarState, NicheDescription, thundercloud_config, ThundercloudConfig, ThunderConfig, WriteMode};
-use crate::path::{AbsolutePath, RelativePath, SingleComponent};
-use crate::thundercloud::Thumbs::{FromBothCumulusAndInvar, FromCumulus, FromInvar};
-use crate::config_model::UseThundercloudConfig;
-use crate::file_system::{source_file_to_string, ConfigFormat, DirEntry, FileSystem, PathType, SourceFile, TargetFile};
-use crate::thundercloud::DirectoryContext::{Project, ThunderCloud};
 
-pub async fn process_niche<T: ThunderConfig>(thunder_config: T) -> Result<()> {
+pub async fn process_niche<T: ThunderConfig>(niche: &NicheName, thunder_config: T) -> Result<()> {
     let generation_context = GenerationContext(thunder_config);
-    process_niche_in_context(&generation_context).await
+    process_niche_in_context(niche, &generation_context).await
 }
 
-async fn process_niche_in_context<T: ThunderConfig>(generation_context: &GenerationContext<T>) -> Result<()> {
+async fn process_niche_in_context<T>(
+    niche: &NicheName,
+    generation_context: &GenerationContext<T>,
+) -> Result<()>
+where
+    T: ThunderConfig,
+{
     let thundercloud_fs = generation_context.0.thundercloud_file_system();
     let thundercloud_directory = generation_context.0.thundercloud_directory();
     let cumulus = generation_context.0.cumulus();
     let invar = generation_context.0.invar();
     let project_root = generation_context.0.project_root();
     info!("Apply: {:?} ⊕ {:?} ⇒ {:?}", cumulus, invar, project_root);
-    let config = get_config(thundercloud_directory, thundercloud_fs).await?;
-    let niche = config.niche();
-    info!("Thundercloud: {:?}: {:?}", niche.name(), niche.description().unwrap_or(&"-".to_string()));
-    debug!("Use thundercloud: {:?}", generation_context.0.use_thundercloud());
-    let current_directory = RelativePath::from(".");
+    let use_thundercloud = generation_context.0.use_thundercloud();
+    debug!("Use thundercloud: {:?}", use_thundercloud);
+    let thundercloud_directory_option = (!use_thundercloud.bare()).then(|| thundercloud_directory);
+    let config = get_config(thundercloud_directory_option, niche, thundercloud_fs).await?;
     let default_invar_config = config.invar_defaults();
+    let niche = config.niche();
+    info!(
+        "Thundercloud: {:?}: {:?}",
+        niche.name(),
+        niche.description().unwrap_or(&"-".to_string())
+    );
+    let current_directory = RelativePath::from(".");
     let default_invar_state = default_invar_config.clone_state();
     let generation_default_invar_config = generation_context.0.default_invar_config();
     let invar_defaults = generation_default_invar_config.clone_state();
     let target = generation_default_invar_config
-        .target().or_else(|| default_invar_config.target())
-        .map(String::clone).map(RelativePath::from).unwrap_or_else(|| current_directory.clone());
+        .target()
+        .or_else(|| default_invar_config.target())
+        .map(String::clone)
+        .map(RelativePath::from)
+        .unwrap_or_else(|| current_directory.clone());
     let target = RelativePath::from(target);
     let invar_state = default_invar_state.with_invar_state(invar_defaults);
     debug!("String properties: {:?}", invar_state.string_props());
-    generation_context.visit_subtree(&current_directory, &target, FromBothCumulusAndInvar, invar_state.as_ref()).await?;
+    generation_context
+        .visit_subtree(
+            &current_directory,
+            &target,
+            FromBothCumulusAndInvar,
+            invar_state.as_ref(),
+        )
+        .await?;
     Ok(())
 }
 
-async fn get_config<FS: FileSystem>(thundercloud_directory: &AbsolutePath, fs: FS) -> Result<impl ThundercloudConfig> {
-    debug!("Get config: {:?}", thundercloud_directory);
-    let source_file;
+async fn get_config<FS: FileSystem>(
+    thundercloud_directory_option: Option<&AbsolutePath>,
+    niche: &NicheName,
+    fs: FS,
+) -> Result<impl ThundercloudConfig> {
+    debug!("Get config: {:?}", thundercloud_directory_option);
+    let body;
     let config_format;
-    let config_toml = AbsolutePath::new("thundercloud.toml", &thundercloud_directory);
-    if fs.path_type(&config_toml).await == PathType::File {
-        source_file = fs.open_source(config_toml).await?;
-        config_format = ConfigFormat::TOML;
+    let config;
+    if let Some(thundercloud_directory) = thundercloud_directory_option {
+        let source_file;
+        let config_toml = AbsolutePath::new("thundercloud.toml", &thundercloud_directory);
+        if fs.path_type(&config_toml).await == PathType::File {
+            source_file = fs.open_source(config_toml).await?;
+            config_format = ConfigFormat::TOML;
+        } else {
+            let config_yaml = AbsolutePath::new("thundercloud.yaml", &thundercloud_directory);
+            source_file = fs.open_source(config_yaml).await?;
+            config_format = ConfigFormat::YAML;
+        }
+        body = source_file_to_string(source_file).await?;
+        config = thundercloud_config::from_str(&body, config_format)?;
     } else {
-        let config_yaml = AbsolutePath::new("thundercloud.yaml", &thundercloud_directory);
-        source_file = fs.open_source(config_yaml).await?;
-        config_format = ConfigFormat::YAML;
+        config = thundercloud_config::from_niche(niche);
     }
-    let body = source_file_to_string(source_file).await?;
-    let config = thundercloud_config::from_str(&body, config_format)?;
 
     debug!("Thundercloud configuration: {config:?}");
     Ok(config)
 }
 
 #[derive(Debug, Clone, Copy)]
-enum DirectoryContext { ThunderCloud, Project }
+enum DirectoryContext {
+    ThunderCloud,
+    Project,
+}
 
 #[derive(Debug, Clone)]
 struct FileLocation {
@@ -88,15 +129,9 @@ struct Bolt {
 #[derive(Debug, Clone)]
 enum BoltKind {
     Option,
-    Fragment {
-        qualifier: Option<String>
-    },
-    Config {
-        format: ConfigFormat
-    },
-    Unknown {
-        qualifier: Option<String>
-    },
+    Fragment { qualifier: Option<String> },
+    Config { format: ConfigFormat },
+    Unknown { qualifier: Option<String> },
 }
 
 impl Bolt {
@@ -124,12 +159,14 @@ impl Bolt {
     fn source(&self) -> &AbsolutePath {
         &self.source.path
     }
-    fn context(&self) -> DirectoryContext { self.source.context }
+    fn context(&self) -> DirectoryContext {
+        self.source.context
+    }
     fn qualifier(&self) -> Option<String> {
         match &self.kind {
             BoltKind::Fragment { qualifier, .. } => qualifier.clone(),
             BoltKind::Unknown { qualifier, .. } => qualifier.clone(),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -143,12 +180,9 @@ static BOLT_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
 static BOLT_REGEX_WITHOUT_DOT: Lazy<Regex> = Lazy::new(|| {
     Regex::new("^(?<base>[^.]+)[+](?<bolt_type>[a-z0-9_]+)(-(?<feature>[a-z0-9_]+|@)(-(?<qualifier>[a-z0-9_]+))?)?$").unwrap()
 });
-static PLAIN_FILE_REGEX_WITH_DOT: Lazy<Regex> = Lazy::new(|| {
-    Regex::new("^(?<base>.*)(?<extension>[.][^.]*)").unwrap()
-});
-static ILLEGAL_FILE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new("^([.][.]?)?$").unwrap()
-});
+static PLAIN_FILE_REGEX_WITH_DOT: Lazy<Regex> =
+    Lazy::new(|| Regex::new("^(?<base>.*)(?<extension>[.][^.]*)").unwrap());
+static ILLEGAL_FILE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("^([.][.]?)?$").unwrap());
 
 static FRAGMENT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new("==== (?<bracket>(BEGIN|END) )?FRAGMENT (?<feature>[a-z0-9_]+|@)(-(?<qualifier>[a-z0-9_]+))? ====").unwrap()
@@ -179,7 +213,7 @@ impl Thumbs {
 }
 
 trait DirectoryLocation {
-    fn file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry>;
+    fn file_system(&self) -> &impl FileSystem<DirEntryItem = impl DirEntry>;
     fn directory<'a, T: ThunderConfig>(&self, thunder_config: &'a T) -> &'a AbsolutePath;
     fn context(&self) -> DirectoryContext;
 }
@@ -188,7 +222,7 @@ struct CumulusDirectoryLocation<FS: FileSystem>(FS);
 struct InvarDirectoryLocation<FS: FileSystem>(FS);
 
 impl<FS: FileSystem> DirectoryLocation for InvarDirectoryLocation<FS> {
-    fn file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
+    fn file_system(&self) -> &impl FileSystem<DirEntryItem = impl DirEntry> {
         &self.0
     }
 
@@ -202,7 +236,7 @@ impl<FS: FileSystem> DirectoryLocation for InvarDirectoryLocation<FS> {
 }
 
 impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
-    fn file_system(&self) -> &impl FileSystem<DirEntryItem=impl DirEntry> {
+    fn file_system(&self) -> &impl FileSystem<DirEntryItem = impl DirEntry> {
         &self.0
     }
 
@@ -218,13 +252,26 @@ impl<FS: FileSystem> DirectoryLocation for CumulusDirectoryLocation<FS> {
 struct GenerationContext<TC: ThunderConfig>(TC);
 
 impl<TC: ThunderConfig> GenerationContext<TC> {
-    async fn visit_subtree<IS: InvarState>(&self, source_dir: &RelativePath, target_dir: &RelativePath, thumbs: Thumbs, invar_config: &IS) -> Result<()> {
-        let cumulus_directory_location = CumulusDirectoryLocation(self.0.thundercloud_file_system().clone());
-        let (cumulus_bolts, cumulus_subdirectories) =
-            self.try_visit_directory(thumbs.visit_cumulus(), &cumulus_directory_location, source_dir).await?;
+    async fn visit_subtree<IS: InvarState>(
+        &self,
+        source_dir: &RelativePath,
+        target_dir: &RelativePath,
+        thumbs: Thumbs,
+        invar_config: &IS,
+    ) -> Result<()> {
+        let cumulus_directory_location =
+            CumulusDirectoryLocation(self.0.thundercloud_file_system().clone());
+        let (cumulus_bolts, cumulus_subdirectories) = self
+            .try_visit_directory(
+                thumbs.visit_cumulus(),
+                &cumulus_directory_location,
+                source_dir,
+            )
+            .await?;
         let invar_directory_location = InvarDirectoryLocation(self.0.project_file_system().clone());
-        let (invar_bolts, invar_subdirectories) =
-            self.try_visit_directory(thumbs.visit_invar(), &invar_directory_location, source_dir).await?;
+        let (invar_bolts, invar_subdirectories) = self
+            .try_visit_directory(thumbs.visit_invar(), &invar_directory_location, source_dir)
+            .await?;
 
         let bolts = combine(cumulus_bolts, invar_bolts);
         for (key, bolt_lists) in &bolts {
@@ -234,22 +281,42 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         let new_target_option = self.generate_files(target_dir, bolts, invar_config).await?;
         let target_dir = new_target_option.as_ref().unwrap_or(target_dir);
 
-        self.visit_subdirectories(source_dir, target_dir, cumulus_subdirectories, invar_subdirectories, invar_config).await?;
+        self.visit_subdirectories(
+            source_dir,
+            target_dir,
+            cumulus_subdirectories,
+            invar_subdirectories,
+            invar_config,
+        )
+        .await?;
 
         Ok(())
     }
 
-    async fn generate_files<IS: InvarState>(&self, directory: &RelativePath, bolts: AHashMap<String, (Vec<Bolt>, Vec<Bolt>)>, invar_config: &IS) -> Result<Option<RelativePath>> {
+    async fn generate_files<IS: InvarState>(
+        &self,
+        directory: &RelativePath,
+        bolts: AHashMap<String, (Vec<Bolt>, Vec<Bolt>)>,
+        invar_config: &IS,
+    ) -> Result<Option<RelativePath>> {
         let mut new_target_dir = None;
         let mut bolts = bolts;
         let mut use_config = Cow::Borrowed(invar_config);
         let mut use_target = Cow::Borrowed(directory);
         if let Some(dir_bolts) = bolts.remove(".") {
             let dir_bolt_list = combine_bolt_lists(&dir_bolts.0, &dir_bolts.1);
-            let (updated_config, target_dir) = self.update_invar_config(invar_config, &dir_bolt_list).await?;
+            let (updated_config, target_dir) = self
+                .update_invar_config(invar_config, &dir_bolt_list)
+                .await?;
             use_config = updated_config;
             if let Some(target_dir) = target_dir {
-                let mut new_target = RelativePath::from(directory.clone().parent().unwrap_or(directory).to_path_buf());
+                let mut new_target = RelativePath::from(
+                    directory
+                        .clone()
+                        .parent()
+                        .unwrap_or(directory)
+                        .to_path_buf(),
+                );
                 let interpolated_target = interpolate(&target_dir, use_config.as_ref());
                 new_target.push(RelativePath::from(interpolated_target));
                 use_target = Cow::Owned(new_target.clone());
@@ -261,78 +328,134 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         let bolts = bolts;
 
         let target_directory = use_target.relative_to(self.0.project_root());
-        debug!("Generate files in {:?} with config {:?}", &target_directory, &use_config);
+        debug!(
+            "Generate files in {:?} with config {:?}",
+            &target_directory, &use_config
+        );
         for (name, bolt_lists) in &bolts {
             if ILLEGAL_FILE_REGEX.is_match(name) {
                 warn!("Target filename is not legal: {name:?}");
                 continue;
             }
-            let half_config = self.update_invar_config(use_config.as_ref(), &bolt_lists.0).await?;
-            let whole_config = self.update_invar_config(half_config.0.as_ref(), &bolt_lists.1).await?;
+            let half_config = self
+                .update_invar_config(use_config.as_ref(), &bolt_lists.0)
+                .await?;
+            let whole_config = self
+                .update_invar_config(half_config.0.as_ref(), &bolt_lists.1)
+                .await?;
             let (option, bolts) = self.combine_and_filter_bolt_lists(&bolt_lists.0, &bolt_lists.1);
-            let target = half_config.1.or(whole_config.1).unwrap_or_else(|| name.to_string());
+            let target = half_config
+                .1
+                .or(whole_config.1)
+                .unwrap_or_else(|| name.to_string());
             let interpolated_target = interpolate(&target, whole_config.0.as_ref());
-            let target_file = RelativePath::from(interpolated_target).relative_to(&target_directory);
-            self.generate_file(&target_file, option, bolts, whole_config.0.as_ref()).await?;
+            let target_file =
+                RelativePath::from(interpolated_target).relative_to(&target_directory);
+            self.generate_file(&target_file, option, bolts, whole_config.0.as_ref())
+                .await?;
         }
         Ok(new_target_dir)
     }
 
-    async fn generate_file<IS: InvarState>(&self, target_path: &AbsolutePath, option: Option<Bolt>, bolts: Vec<Bolt>, invar_config: &IS) -> Result<()> {
-        let option =
-            if let Some(option) = option {
-                option
-            } else {
-                debug!("Skip (only fragments): {:?}: {:?}", target_path, &bolts);
-                return Ok(())
-            }
-            ;
+    async fn generate_file<IS: InvarState>(
+        &self,
+        target_path: &AbsolutePath,
+        option: Option<Bolt>,
+        bolts: Vec<Bolt>,
+        invar_config: &IS,
+    ) -> Result<()> {
+        let option = if let Some(option) = option {
+            option
+        } else {
+            debug!("Skip (only fragments): {:?}: {:?}", target_path, &bolts);
+            return Ok(());
+        };
         if invar_config.write_mode() == WriteMode::Ignore {
-            debug!("Ignore: {:?}: {:?}: {:?}", target_path, &bolts, &invar_config);
-            return Ok(())
+            debug!(
+                "Ignore: {:?}: {:?}: {:?}",
+                target_path, &bolts, &invar_config
+            );
+            return Ok(());
+        } else {
+            debug!("Generating: {:?}", target_path);
         }
         let file_system = self.0.project_file_system();
-        if let Some(target_file) = file_system.open_target(target_path.clone(), invar_config.write_mode(), invar_config.executable()).await? {
+        if let Some(target_file) = file_system
+            .open_target(
+                target_path.clone(),
+                invar_config.write_mode(),
+                invar_config.executable(),
+            )
+            .await?
+        {
             let source = option.source();
             match option.context() {
                 ThunderCloud => {
                     let fs = self.0.thundercloud_file_system();
                     let source_file = fs.open_source(source.clone()).await?;
-                    self.generate_option(option, bolts, invar_config, source_file, &target_file).await?
-                },
+                    self.generate_option(option, bolts, invar_config, source_file, &target_file)
+                        .await?
+                }
                 Project => {
                     let fs = self.0.project_file_system();
                     let source_file = fs.open_source(source.clone()).await?;
-                    self.generate_option(option, bolts, invar_config, source_file, &target_file).await?
+                    self.generate_option(option, bolts, invar_config, source_file, &target_file)
+                        .await?
                 }
             }
             let mut target_file_mut = target_file;
             target_file_mut.close().await?;
         } else {
-            debug!("Skip (target exists): {:?}: {:?}: {:?}", target_path, &bolts, &invar_config);
+            debug!(
+                "Skip (target exists): {:?}: {:?}: {:?}",
+                target_path, &bolts, &invar_config
+            );
         }
         Ok(())
     }
 
-    async fn generate_option<IS, SF, TF>(&self, option: Bolt, fragments: Vec<Bolt>, invar_config: &IS, mut source_file: SF, target_file: &TF) -> Result<()>
+    async fn generate_option<IS, SF, TF>(
+        &self,
+        option: Bolt,
+        fragments: Vec<Bolt>,
+        invar_config: &IS,
+        mut source_file: SF,
+        target_file: &TF,
+    ) -> Result<()>
     where
         IS: InvarState,
         SF: SourceFile,
-        TF: TargetFile
+        TF: TargetFile,
     {
-        debug!("Generating option: {:?}: {:?}: {:?}", &option, &fragments, invar_config);
+        debug!(
+            "Generating option: {:?}: {:?}: {:?}",
+            &option, &fragments, invar_config
+        );
         while let Some(line) = source_file.next_line().await? {
             let line = interpolate(&line, invar_config);
             if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
-                let feature = captures.name("feature").map(|m| m.as_str().to_string()).unwrap_or("@".to_string());
-                let qualifier = captures.name("qualifier").map(|m| m.as_str().to_string()).unwrap_or("".to_string());
+                let feature = captures
+                    .name("feature")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or("@".to_string());
+                let qualifier = captures
+                    .name("qualifier")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or("".to_string());
                 debug!("Found fragment: {:?}: {:?}", &feature, &qualifier);
                 if let Some(bracket) = captures.name("bracket") {
                     if bracket.as_str() == "BEGIN " {
                         skip_to_end_of_fragment(&mut source_file, &feature, &qualifier).await?;
                     }
                 }
-                self.find_and_include_fragment(&feature, &qualifier, target_file, &fragments, invar_config).await?;
+                self.find_and_include_fragment(
+                    &feature,
+                    &qualifier,
+                    target_file,
+                    &fragments,
+                    invar_config,
+                )
+                .await?;
                 continue;
             }
             send_to_writer(&line, target_file).await?;
@@ -340,14 +463,28 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn find_and_include_fragment<IS, TF>(&self, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IS) -> Result<()>
+    async fn find_and_include_fragment<IS, TF>(
+        &self,
+        feature: &str,
+        qualifier: &str,
+        target_file: &TF,
+        fragments: &Vec<Bolt>,
+        invar_config: &IS,
+    ) -> Result<()>
     where
         IS: InvarState,
-        TF: TargetFile
+        TF: TargetFile,
     {
         for bolt in fragments {
-            if let BoltKind::Fragment { qualifier: fragment_qualifier, .. } = &bolt.kind {
-                let fragment_qualifier = fragment_qualifier.as_ref().map(ToOwned::to_owned).unwrap_or("".to_string());
+            if let BoltKind::Fragment {
+                qualifier: fragment_qualifier,
+                ..
+            } = &bolt.kind
+            {
+                let fragment_qualifier = fragment_qualifier
+                    .as_ref()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or("".to_string());
                 if bolt.feature_name == feature && fragment_qualifier == qualifier {
                     debug!("Found fragment to include: {:?}", bolt);
                     let source = bolt.source();
@@ -355,12 +492,28 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                         ThunderCloud => {
                             let fs = self.0.thundercloud_file_system();
                             let source_file = fs.open_source(source.clone()).await?;
-                            self.include_fragment(source_file, feature, qualifier, target_file, fragments, invar_config).await?;
-                        },
+                            self.include_fragment(
+                                source_file,
+                                feature,
+                                qualifier,
+                                target_file,
+                                fragments,
+                                invar_config,
+                            )
+                            .await?;
+                        }
                         Project => {
                             let fs = self.0.project_file_system();
                             let source_file = fs.open_source(source.clone()).await?;
-                            self.include_fragment(source_file, feature, qualifier, target_file, fragments, invar_config).await?;
+                            self.include_fragment(
+                                source_file,
+                                feature,
+                                qualifier,
+                                target_file,
+                                fragments,
+                                invar_config,
+                            )
+                            .await?;
                         }
                     }
                     break;
@@ -370,22 +523,47 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn include_fragment<SF, TF, IS>(&self, mut source_file: SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IS) -> Result<()>
+    async fn include_fragment<SF, TF, IS>(
+        &self,
+        mut source_file: SF,
+        feature: &str,
+        qualifier: &str,
+        target_file: &TF,
+        fragments: &Vec<Bolt>,
+        invar_config: &IS,
+    ) -> Result<()>
     where
         SF: SourceFile,
         TF: TargetFile,
-        IS: InvarState
+        IS: InvarState,
     {
         while let Some(line) = source_file.next_line().await? {
             let line = interpolate(&line, invar_config);
             if let Some(captures) = FRAGMENT_REGEX.captures(&line) {
-                let placeholder_feature = captures.name("feature").map(|m| m.as_str().to_string()).unwrap_or("@".to_string());
-                let placeholder_qualifier = captures.name("qualifier").map(|m| m.as_str().to_string()).unwrap_or("".to_string());
+                let placeholder_feature = captures
+                    .name("feature")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or("@".to_string());
+                let placeholder_qualifier = captures
+                    .name("qualifier")
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or("".to_string());
                 debug!("Found placeholder: {:?}: {:?}", &feature, &qualifier);
                 if let Some(bracket) = captures.name("bracket") {
-                    if bracket.as_str() == "BEGIN " && placeholder_feature == feature && placeholder_qualifier == qualifier {
+                    if bracket.as_str() == "BEGIN "
+                        && placeholder_feature == feature
+                        && placeholder_qualifier == qualifier
+                    {
                         send_to_writer(&line, target_file).await?;
-                        self.copy_to_end_of_fragment(&mut source_file, &feature, &qualifier, target_file, fragments, invar_config).await?;
+                        self.copy_to_end_of_fragment(
+                            &mut source_file,
+                            &feature,
+                            &qualifier,
+                            target_file,
+                            fragments,
+                            invar_config,
+                        )
+                        .await?;
                     }
                 }
                 return Ok(());
@@ -395,11 +573,19 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn copy_to_end_of_fragment<SF, TF, IS>(&self, lines: &mut SF, feature: &str, qualifier: &str, target_file: &TF, fragments: &Vec<Bolt>, invar_config: &IS) -> Result<()>
+    async fn copy_to_end_of_fragment<SF, TF, IS>(
+        &self,
+        lines: &mut SF,
+        feature: &str,
+        qualifier: &str,
+        target_file: &TF,
+        fragments: &Vec<Bolt>,
+        invar_config: &IS,
+    ) -> Result<()>
     where
         SF: SourceFile,
         TF: TargetFile,
-        IS: InvarState
+        IS: InvarState,
     {
         while let Some(fragment_line) = lines.next_line().await? {
             let line = interpolate(&fragment_line, invar_config);
@@ -414,7 +600,14 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                             skip_to_end_of_fragment(lines, &feature, &qualifier).await?;
                         }
                     }
-                    Box::pin(self.find_and_include_fragment(&feature, &qualifier, target_file, fragments, invar_config)).await?;
+                    Box::pin(self.find_and_include_fragment(
+                        &feature,
+                        &qualifier,
+                        target_file,
+                        fragments,
+                        invar_config,
+                    ))
+                    .await?;
                     continue;
                 }
             }
@@ -423,7 +616,11 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok(())
     }
 
-    async fn update_invar_config<'a, IS>(&self, invar_config: &'a IS, bolts: &Vec<Bolt>) -> Result<(Cow<'a, IS>, Option<String>)>
+    async fn update_invar_config<'a, IS>(
+        &self,
+        invar_config: &'a IS,
+        bolts: &Vec<Bolt>,
+    ) -> Result<(Cow<'a, IS>, Option<String>)>
     where
         IS: InvarState,
     {
@@ -444,8 +641,16 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                     target = Some(bolt_target.clone());
                 }
                 let bolt_invar_state = bolt_invar_config.clone_state();
-                debug!("Apply bolt configuration: {:?}: {:?} += {:?}", bolt.target_name(), invar_config, &bolt_invar_config);
-                let new_use_config = use_config.to_owned().with_invar_state(bolt_invar_state).into_owned();
+                debug!(
+                    "Apply bolt configuration: {:?}: {:?} += {:?}",
+                    bolt.target_name(),
+                    invar_config,
+                    &bolt_invar_config
+                );
+                let new_use_config = use_config
+                    .to_owned()
+                    .with_invar_state(bolt_invar_state)
+                    .into_owned();
                 use_config = Cow::Owned(new_use_config);
             }
         }
@@ -453,7 +658,11 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         Ok((use_config, target))
     }
 
-    fn combine_and_filter_bolt_lists(&self, cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>) -> (Option<Bolt>, Vec<Bolt>) {
+    fn combine_and_filter_bolt_lists(
+        &self,
+        cumulus_bolts_list: &Vec<Bolt>,
+        invar_bolts_list: &Vec<Bolt>,
+    ) -> (Option<Bolt>, Vec<Bolt>) {
         let combined = combine_bolt_lists(cumulus_bolts_list, invar_bolts_list);
         self.filter_options(&combined)
     }
@@ -483,10 +692,17 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         (first_option, fragments)
     }
 
-    async fn visit_subdirectories<IS>(&self, source_dir: &RelativePath, target_dir: &RelativePath, cumulus_subdirectories: AHashSet<SingleComponent>, invar_subdirectories: AHashSet<SingleComponent>, invar_config: &IS) -> Result<()>
+    async fn visit_subdirectories<IS>(
+        &self,
+        source_dir: &RelativePath,
+        target_dir: &RelativePath,
+        cumulus_subdirectories: AHashSet<SingleComponent>,
+        invar_subdirectories: AHashSet<SingleComponent>,
+        invar_config: &IS,
+    ) -> Result<()>
     where
         TC: ThunderConfig,
-        IS: InvarState
+        IS: InvarState,
     {
         let mut invar_subdirectories = invar_subdirectories;
         for path in cumulus_subdirectories {
@@ -501,8 +717,14 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             source_subdir.push(path.clone());
             let mut target_subdir = target_dir.clone();
             target_subdir.push(path);
-            
-            Box::pin(self.visit_subtree(&source_subdir, &target_subdir, subdirectory_thumbs, invar_config)).await?;
+
+            Box::pin(self.visit_subtree(
+                &source_subdir,
+                &target_subdir,
+                subdirectory_thumbs,
+                invar_config,
+            ))
+            .await?;
         }
         for path in invar_subdirectories {
             let path: RelativePath = path.try_into()?;
@@ -510,13 +732,20 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             source_subdir.push(path.clone());
             let mut target_subdir = target_dir.clone();
             target_subdir.push(path);
-            Box::pin(self.visit_subtree(&source_subdir, &target_subdir, FromInvar, invar_config)).await?;
+            Box::pin(self.visit_subtree(&source_subdir, &target_subdir, FromInvar, invar_config))
+                .await?;
         }
         Ok(())
     }
 
-    async fn try_visit_directory<DL>(&self, exists: bool, directory_location: &DL, directory: &RelativePath) -> Result<(AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>)>
-    where DL: DirectoryLocation
+    async fn try_visit_directory<DL>(
+        &self,
+        exists: bool,
+        directory_location: &DL,
+        directory: &RelativePath,
+    ) -> Result<(AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>)>
+    where
+        DL: DirectoryLocation,
     {
         if exists {
             let source_root = directory_location.directory(&self.0);
@@ -527,10 +756,20 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
         }
     }
 
-    async fn visit_directory<DL>(&self, directory_location: &DL, directory: &AbsolutePath) -> Result<(AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>)>
-    where DL: DirectoryLocation
+    async fn visit_directory<DL>(
+        &self,
+        directory_location: &DL,
+        directory: &AbsolutePath,
+    ) -> Result<(AHashMap<String, Vec<Bolt>>, AHashSet<SingleComponent>)>
+    where
+        DL: DirectoryLocation,
     {
-        trace!("Visit directory: {:?} ⇒ {:?} [{:?}]", &directory, self.0.project_root(), self.0.invar());
+        trace!(
+            "Visit directory: {:?} ⇒ {:?} [{:?}]",
+            &directory,
+            self.0.project_root(),
+            self.0.invar()
+        );
         let mut bolts = AHashMap::new();
         let mut subdirectories = AHashSet::new();
         let file_system = directory_location.file_system();
@@ -538,7 +777,9 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             debug!("Ignoring directory {:?}", directory);
             return Ok((bolts, subdirectories));
         }
-        let entries = file_system.read_dir(directory).await
+        let entries = file_system
+            .read_dir(directory)
+            .await
             .map_err(|e| anyhow!(format!("error reading {:?}: {:?}", &directory, e)))?;
         let mut entries = pin!(entries);
         while let Some(entry) = entries.next().await {
@@ -552,7 +793,10 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
             } else {
                 let file_name = entry.file_name().to_string_lossy().into_owned();
                 let source_path = RelativePath::from(file_name.as_str()).relative_to(directory);
-                let source = FileLocation { path: source_path, context: directory_location.context() };
+                let source = FileLocation {
+                    path: source_path,
+                    context: directory_location.context(),
+                };
                 let bolt;
                 if let Some(captures) = CONFIG_REGEX.captures(&file_name) {
                     bolt = config_captures_to_bolt(captures, source)?;
@@ -564,27 +808,28 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                     bolt = captures_to_bolt(captures, source)?;
                 } else if let Some(captures) = PLAIN_FILE_REGEX_WITH_DOT.captures(&file_name) {
                     debug!("Plain file regex with dot: {:?}", &file_name);
-                    let (base_name, extension) =
-                        if let (Some(b), Some(e)) = (captures.name("base"), captures.name("extension")) {
-                            (b.as_str(), e.as_str())
-                        } else {
-                            (&*file_name, "")
-                        };
-                    bolt = Bolt{
+                    let (base_name, extension) = if let (Some(b), Some(e)) =
+                        (captures.name("base"), captures.name("extension"))
+                    {
+                        (b.as_str(), e.as_str())
+                    } else {
+                        (&*file_name, "")
+                    };
+                    bolt = Bolt {
                         base_name: base_name.to_string(),
                         extension: extension.to_string(),
                         feature_name: "@".to_string(),
                         source,
-                        kind: BoltKind::Option
+                        kind: BoltKind::Option,
                     }
                 } else {
                     debug!("Unrecognized file name: {:?}", &file_name);
-                    bolt = Bolt{
+                    bolt = Bolt {
                         base_name: file_name.to_string(),
                         extension: "".to_string(),
                         feature_name: "@".to_string(),
                         source,
-                        kind: BoltKind::Option
+                        kind: BoltKind::Option,
                     }
                 }
                 debug!("Bolt: {bolt:?}");
@@ -597,13 +842,16 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
                 let qualifier = match &bolt.kind {
                     BoltKind::Fragment { qualifier, .. } => qualifier,
                     BoltKind::Unknown { qualifier, .. } => qualifier,
-                    _ => &None
+                    _ => &None,
                 };
                 if let Some(qualifier) = qualifier {
                     qualifiers.push(qualifier.to_owned());
                 }
             }
-            debug!("Found bolts: {:?}: {:?}: {:?}: {:?}", &directory, target_name, bolts, qualifiers);
+            debug!(
+                "Found bolts: {:?}: {:?}: {:?}: {:?}",
+                &directory, target_name, bolts, qualifiers
+            );
         }
         Ok((bolts, subdirectories))
     }
@@ -611,7 +859,7 @@ impl<TC: ThunderConfig> GenerationContext<TC> {
 
 async fn skip_to_end_of_fragment<SF>(lines: &mut SF, feature: &str, qualifier: &str) -> Result<()>
 where
-    SF: SourceFile
+    SF: SourceFile,
 {
     while let Some(fragment_line) = lines.next_line().await? {
         if let Some(captures) = FRAGMENT_REGEX.captures(&fragment_line) {
@@ -627,11 +875,17 @@ where
 fn is_matching_end(captures: &Captures, feature: &str, qualifier: &str) -> bool {
     if let Some(inner_bracket) = captures.name("bracket") {
         if inner_bracket.as_str() == "END " {
-            let inner_feature = captures.name("feature").map(|m| m.as_str().to_string()).unwrap_or("@".to_string());
+            let inner_feature = captures
+                .name("feature")
+                .map(|m| m.as_str().to_string())
+                .unwrap_or("@".to_string());
             if inner_feature != feature {
                 return false;
             }
-            let inner_qualifier = captures.name("qualifier").map(|m| m.as_str().to_string()).unwrap_or("".to_string());
+            let inner_qualifier = captures
+                .name("qualifier")
+                .map(|m| m.as_str().to_string())
+                .unwrap_or("".to_string());
             if inner_qualifier != qualifier {
                 return false;
             }
@@ -663,19 +917,37 @@ fn get_invar_config(body: &str, config_format: ConfigFormat) -> Result<impl Inva
     Ok(config)
 }
 
-fn combine(cumulus_bolts: AHashMap<String, Vec<Bolt>>, invar_bolts: AHashMap<String, Vec<Bolt>>) -> AHashMap<String, (Vec<Bolt>, Vec<Bolt>)> {
-    let cumulus_keys: AHashSet<String> = cumulus_bolts.iter().map(|(k, _)| k).map(ToOwned::to_owned).collect();
-    let invar_keys: AHashSet<String> = invar_bolts.iter().map(|(k, _)| k).map(ToOwned::to_owned).collect();
+fn combine(
+    cumulus_bolts: AHashMap<String, Vec<Bolt>>,
+    invar_bolts: AHashMap<String, Vec<Bolt>>,
+) -> AHashMap<String, (Vec<Bolt>, Vec<Bolt>)> {
+    let cumulus_keys: AHashSet<String> = cumulus_bolts
+        .iter()
+        .map(|(k, _)| k)
+        .map(ToOwned::to_owned)
+        .collect();
+    let invar_keys: AHashSet<String> = invar_bolts
+        .iter()
+        .map(|(k, _)| k)
+        .map(ToOwned::to_owned)
+        .collect();
     let keys = cumulus_keys.union(&invar_keys);
-    keys.map(
-        |k: &String|
-            (k.to_owned(),
-             (
-                 cumulus_bolts.get(k).map(ToOwned::to_owned).unwrap_or_else(Vec::new),
-                 invar_bolts.get(k).map(ToOwned::to_owned).unwrap_or_else(Vec::new)
-             )
-            )
-    ).collect()
+    keys.map(|k: &String| {
+        (
+            k.to_owned(),
+            (
+                cumulus_bolts
+                    .get(k)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(Vec::new),
+                invar_bolts
+                    .get(k)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(Vec::new),
+            ),
+        )
+    })
+    .collect()
 }
 
 fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bolt>) -> Vec<Bolt> {
@@ -698,45 +970,78 @@ fn combine_bolt_lists(cumulus_bolts_list: &Vec<Bolt>, invar_bolts_list: &Vec<Bol
 }
 
 fn captures_to_bolt(captures: Captures, source: FileLocation) -> Result<Bolt> {
-    let extension = captures.name("extension").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
-    let feature_name = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
-    let qualifier = captures.name("qualifier").map(|m|m.as_str().to_string());
-    if let (Some(base_name_orig), Some(bolt_type)) = (captures.name("base"), captures.name("bolt_type")) {
+    let extension = captures
+        .name("extension")
+        .map(|m| m.as_str().to_string())
+        .unwrap_or("".to_string());
+    let feature_name = captures
+        .name("feature")
+        .map(|m| m.as_str().to_string())
+        .unwrap_or("@".to_string());
+    let qualifier = captures.name("qualifier").map(|m| m.as_str().to_string());
+    if let (Some(base_name_orig), Some(bolt_type)) =
+        (captures.name("base"), captures.name("bolt_type"))
+    {
         let base_name = to_base_name(base_name_orig.as_str());
         let bolt_type = bolt_type.as_str();
-        let bolt =
-            if bolt_type == "option" {
-                Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Option}
-            } else if bolt_type == "fragment" {
-                Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Fragment { qualifier } }
-            } else {
-                Bolt{ base_name, extension, feature_name, source, kind: BoltKind::Unknown { qualifier } }
-            };
+        let bolt = if bolt_type == "option" {
+            Bolt {
+                base_name,
+                extension,
+                feature_name,
+                source,
+                kind: BoltKind::Option,
+            }
+        } else if bolt_type == "fragment" {
+            Bolt {
+                base_name,
+                extension,
+                feature_name,
+                source,
+                kind: BoltKind::Fragment { qualifier },
+            }
+        } else {
+            Bolt {
+                base_name,
+                extension,
+                feature_name,
+                source,
+                kind: BoltKind::Unknown { qualifier },
+            }
+        };
         Ok(bolt)
     } else {
         bail!("Internal error")
     }
 }
 fn config_captures_to_bolt(captures: Captures, source: FileLocation) -> Result<Bolt> {
-    let extension = captures.name("extension").map(|m|m.as_str().to_string()).unwrap_or("".to_string());
-    let feature_name = captures.name("feature").map(|m|m.as_str().to_string()).unwrap_or("@".to_string());
-    if let (Some(base_name_orig), Some(format_match)) = (captures.name("base"), captures.name("format")) {
+    let extension = captures
+        .name("extension")
+        .map(|m| m.as_str().to_string())
+        .unwrap_or("".to_string());
+    let feature_name = captures
+        .name("feature")
+        .map(|m| m.as_str().to_string())
+        .unwrap_or("@".to_string());
+    if let (Some(base_name_orig), Some(format_match)) =
+        (captures.name("base"), captures.name("format"))
+    {
         let base_name = to_base_name(base_name_orig.as_str());
         let format_str = format_match.as_str();
-        let format =
-            if format_str == "toml" { ConfigFormat::TOML }
-            else if format_str == "yaml" { ConfigFormat::YAML }
-            else { bail!("Unknown config file format: {:?}", format_match) }
-        ;
-        let config =
-            Bolt{
-                base_name: base_name.to_string(),
-                extension: extension.to_string(),
-                feature_name: feature_name.to_string(),
-                source,
-                kind: BoltKind::Config { format },
-            }
-        ;
+        let format = if format_str == "toml" {
+            ConfigFormat::TOML
+        } else if format_str == "yaml" {
+            ConfigFormat::YAML
+        } else {
+            bail!("Unknown config file format: {:?}", format_match)
+        };
+        let config = Bolt {
+            base_name: base_name.to_string(),
+            extension: extension.to_string(),
+            feature_name: feature_name.to_string(),
+            source,
+            kind: BoltKind::Config { format },
+        };
         Ok(config)
     } else {
         bail!("Internal error")
@@ -745,15 +1050,19 @@ fn config_captures_to_bolt(captures: Captures, source: FileLocation) -> Result<B
 
 fn to_base_name(base_name_orig: &str) -> String {
     let base_name = base_name_orig.to_string();
-    let base_name = base_name.strip_prefix("dot_")
+    let base_name = base_name
+        .strip_prefix("dot_")
         .map(|stripped| ".".to_string() + stripped)
         .unwrap_or(base_name);
-    base_name.strip_prefix("x_").unwrap_or(&base_name).to_string()
+    base_name
+        .strip_prefix("x_")
+        .unwrap_or(&base_name)
+        .to_string()
 }
 
-fn add<K,I>(map: &mut AHashMap<K,Vec<I>>, key: &K, item: I)
+fn add<K, I>(map: &mut AHashMap<K, Vec<I>>, key: &K, item: I)
 where
-    K: PartialEq + Eq + Hash + Clone
+    K: PartialEq + Eq + Hash + Clone,
 {
     if let Some(existing_list) = map.get_mut(key) {
         existing_list.push(item);
@@ -766,13 +1075,13 @@ where
 
 #[cfg(test)]
 mod test {
+    use super::*;
+    use crate::config_model::{project_config, NicheTriggers, ProjectConfig, PsychotropicConfig};
+    use crate::file_system::fixture;
+    use crate::file_system::ConfigFormat::TOML;
+    use crate::path::test_utils::to_absolute_path;
     use indoc::indoc;
     use test_log::test;
-    use crate::config_model::{project_config, NicheTriggers, ProjectConfig, PsychotropicConfig};
-    use crate::file_system::ConfigFormat::TOML;
-    use crate::file_system::fixture;
-    use crate::path::test_utils::to_absolute_path;
-    use super::*;
 
     #[test(tokio::test)]
     async fn test_process_complex_niche() -> Result<()> {
@@ -853,7 +1162,8 @@ mod test {
 
         // When
         let result_file_path = to_absolute_path("/Ankh-Morpork/Jeremy/clock.yaml");
-        let result_body = test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
+        let result_body =
+            test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
 
         // Then
         let expected_result = indoc! {r#"
@@ -915,7 +1225,8 @@ mod test {
 
         // When
         let result_file_path = to_absolute_path("/workshop/x_x");
-        let result_body = test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
+        let result_body =
+            test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
 
         // Then
         let expected_result = indoc! {r#"
@@ -928,21 +1239,71 @@ mod test {
         Ok(())
     }
 
-    async fn test_process_niche(thundercloud_toml: &str, project_toml: &str, result_file_path: AbsolutePath) -> Result<String> {
+    #[test(tokio::test)]
+    async fn test_bare_thundercloud() -> Result<()> {
+        // Given
+        let thundercloud_toml = indoc! {r#"
+            [example-thundercloud]
+            "x_x_x+option-kermie.md" = "Miss Piggy"
+        "#};
+        let project_toml = indoc! {r#"
+            "CargoCult.toml" = '''
+            [[psychotropic.cues]]
+            name = "example"
+
+            [psychotropic.cues.use-thundercloud]
+            directory = "{{PROJECT}}/example-thundercloud/cumulus/workshop"
+            bare = true
+            on-incoming = "Update"
+            features = ["kermie"]
+            '''
+        "#};
+
+        // When
+        let result_file_path = to_absolute_path("/x_x.md");
+        let result_body =
+            test_process_niche(thundercloud_toml, project_toml, result_file_path).await?;
+
+        // Then
+        assert_eq!(&result_body, "Miss Piggy\n");
+
+        Ok(())
+    }
+
+    async fn test_process_niche(
+        thundercloud_toml: &str,
+        project_toml: &str,
+        result_file_path: AbsolutePath,
+    ) -> Result<String> {
         // Given
         let thundercloud_fs = fixture::from_toml(thundercloud_toml)?;
         let project_fs = fixture::from_toml(project_toml)?;
         let project_config = create_project_config(project_fs.clone()).await?;
         let niche_triggers = get_niche_triggers(&project_config)?;
-        let default_invar_config = niche_triggers.use_thundercloud().unwrap().invar_defaults().into_owned();
+        let default_invar_config = niche_triggers
+            .use_thundercloud()
+            .unwrap()
+            .invar_defaults()
+            .into_owned();
         let project_root = AbsolutePath::root();
         let thundercloud_directory = to_absolute_path("/example-thundercloud");
         let invar_directory = to_absolute_path("/yeth-marthter/example/invar");
-        let thunder_config = niche_triggers.use_thundercloud().unwrap().new_thunder_config(default_invar_config, thundercloud_fs.clone(), thundercloud_directory.clone(), project_fs.clone(), invar_directory.clone(), project_root.clone());
+        let thunder_config = niche_triggers
+            .use_thundercloud()
+            .unwrap()
+            .new_thunder_config(
+                default_invar_config,
+                thundercloud_fs.clone(),
+                thundercloud_directory.clone(),
+                project_fs.clone(),
+                invar_directory.clone(),
+                project_root.clone(),
+            );
         let generation_context = GenerationContext(thunder_config);
+        let niche = NicheName("example".to_string());
 
         // When
-        let result = process_niche_in_context(&generation_context).await;
+        let result = process_niche_in_context(&niche, &generation_context).await;
 
         // Then
         result?;
@@ -958,10 +1319,14 @@ mod test {
         Ok(project_config::from_str(&body, TOML)?)
     }
 
-    fn get_niche_triggers<PC: ProjectConfig>(project_config: &PC) -> Result<impl NicheTriggers + '_> {
+    fn get_niche_triggers<PC: ProjectConfig>(
+        project_config: &PC,
+    ) -> Result<impl NicheTriggers + '_> {
         let psychotropic_config = project_config.psychotropic()?;
         let niche_triggers = psychotropic_config.get("example");
-        niche_triggers.map(|nt| nt.clone()).ok_or_else(|| anyhow!("Niche not found: 'example'"))
+        niche_triggers
+            .map(|nt| nt.clone())
+            .ok_or_else(|| anyhow!("Niche not found: 'example'"))
     }
 
     // Utilities

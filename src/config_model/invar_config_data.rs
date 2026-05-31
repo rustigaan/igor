@@ -1,12 +1,12 @@
 use crate::config_model::invar_config::*;
-use std::borrow::Cow;
-use std::sync::LazyLock;
+use crate::file_system::ConfigFormat;
 use ahash::AHashMap;
 use anyhow::Result;
 use log::debug;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::sync::LazyLock;
 use toml::{Table, Value};
-use crate::file_system::ConfigFormat;
 
 macro_rules! invar_struct {
     ($v:vis $name:ident $([$($derive:ident),+])? { $($x:ident : $y:ty),* $(,)? }) => {
@@ -53,7 +53,7 @@ impl InvarConfigData {
             interpolate: invar_state.interpolate_option(),
             executable: invar_state.executable_option(),
             props: invar_state.props_option().clone(),
-            target: target.map(Clone::clone)
+            target: target.map(Clone::clone),
         }
     }
 }
@@ -109,29 +109,49 @@ impl InvarConfig for InvarConfigData {
 }
 
 impl InvarState for InvarStateData {
-    fn with_invar_state<I: InvarState>(&self, invar_state: I) -> Cow<Self> {
+    fn with_invar_state<'a, I: InvarState>(&'a self, invar_state: I) -> Cow<'a, Self> {
         let dirty = false;
-        let (write_mode, dirty) = merge_property(self.write_mode, invar_state.write_mode_option(), dirty);
-        debug!("Write mode: {:?} -> {:?} ({:?})", self.write_mode, &write_mode, dirty);
-        let (executable, dirty) = merge_property(self.executable, invar_state.executable_option(), dirty);
-        debug!("Executable: {:?} -> {:?} ({:?})", self.executable, &executable, dirty);
-        let (interpolate, dirty) = merge_property(self.interpolate, invar_state.interpolate_option(), dirty);
-        debug!("Interpolate: {:?} -> {:?} ({:?})", self.interpolate, &interpolate, dirty);
+        let (write_mode, dirty) =
+            merge_property(self.write_mode, invar_state.write_mode_option(), dirty);
+        debug!(
+            "Write mode: {:?} -> {:?} ({:?})",
+            self.write_mode, &write_mode, dirty
+        );
+        let (executable, dirty) =
+            merge_property(self.executable, invar_state.executable_option(), dirty);
+        debug!(
+            "Executable: {:?} -> {:?} ({:?})",
+            self.executable, &executable, dirty
+        );
+        let (interpolate, dirty) =
+            merge_property(self.interpolate, invar_state.interpolate_option(), dirty);
+        debug!(
+            "Interpolate: {:?} -> {:?} ({:?})",
+            self.interpolate, &interpolate, dirty
+        );
         let (props, dirty) = merge_props(&self.props, &invar_state.props_option(), dirty);
         debug!("Props ({:?})", dirty);
         if dirty {
-            Cow::Owned(InvarStateData { write_mode, executable, interpolate, props: Some(props.into_owned()) })
+            Cow::Owned(InvarStateData {
+                write_mode,
+                executable,
+                interpolate,
+                props: Some(props.into_owned()),
+            })
         } else {
             Cow::Borrowed(self)
         }
     }
 
-    fn with_write_mode_option(&self, write_mode: Option<WriteMode>) -> Cow<Self> {
-        let invar_state = InvarStateData { write_mode, ..EMPTY_INVAR_STATE_DATA.clone() };
+    fn with_write_mode_option<'a>(&'a self, write_mode: Option<WriteMode>) -> Cow<'a, Self> {
+        let invar_state = InvarStateData {
+            write_mode,
+            ..EMPTY_INVAR_STATE_DATA.clone()
+        };
         self.with_invar_state(invar_state)
     }
 
-    fn with_write_mode(&self, write_mode: WriteMode) -> Cow<Self> {
+    fn with_write_mode<'a>(&'a self, write_mode: WriteMode) -> Cow<'a, Self> {
         self.with_write_mode_option(Some(write_mode))
     }
 
@@ -143,12 +163,15 @@ impl InvarState for InvarStateData {
         self.write_mode
     }
 
-    fn with_executable_option(&self, executable: Option<bool>) -> Cow<Self> {
-        let invar_state = InvarStateData { executable, ..EMPTY_INVAR_STATE_DATA.clone() };
+    fn with_executable_option<'a>(&'a self, executable: Option<bool>) -> Cow<'a, Self> {
+        let invar_state = InvarStateData {
+            executable,
+            ..EMPTY_INVAR_STATE_DATA.clone()
+        };
         self.with_invar_state(invar_state)
     }
 
-    fn with_executable(&self, executable: bool) -> Cow<Self> {
+    fn with_executable<'a>(&'a self, executable: bool) -> Cow<'a, Self> {
         self.with_executable_option(Some(executable))
     }
 
@@ -160,12 +183,15 @@ impl InvarState for InvarStateData {
         self.executable
     }
 
-    fn with_interpolate_option(&self, interpolate: Option<bool>) -> Cow<Self> {
-        let invar_state = InvarStateData { interpolate, ..EMPTY_INVAR_STATE_DATA.clone() };
+    fn with_interpolate_option<'a>(&'a self, interpolate: Option<bool>) -> Cow<'a, Self> {
+        let invar_state = InvarStateData {
+            interpolate,
+            ..EMPTY_INVAR_STATE_DATA.clone()
+        };
         self.with_invar_state(invar_state)
     }
 
-    fn with_interpolate(&self, interpolate: bool) -> Cow<Self> {
+    fn with_interpolate<'a>(&'a self, interpolate: bool) -> Cow<'a, Self> {
         self.with_interpolate_option(Some(interpolate))
     }
 
@@ -177,42 +203,57 @@ impl InvarState for InvarStateData {
         self.interpolate
     }
 
-    fn with_props_option(&self, props: Option<Table>) -> Cow<Self> {
-        let invar_state = InvarStateData { props, ..EMPTY_INVAR_STATE_DATA.clone() };
+    fn with_props_option<'a>(&'a self, props: Option<Table>) -> Cow<'a, Self> {
+        let invar_state = InvarStateData {
+            props,
+            ..EMPTY_INVAR_STATE_DATA.clone()
+        };
         self.with_invar_state(invar_state)
     }
 
-    fn with_props(&self, props: Table) -> Cow<Self> {
+    fn with_props<'a>(&'a self, props: Table) -> Cow<'a, Self> {
         self.with_props_option(Some(props))
     }
 
-    fn props(&self) -> Cow<Table> {
-        self.props.as_ref().map(Cow::Borrowed).unwrap_or(Cow::Owned(Table::new()))
+    fn props<'a>(&'a self) -> Cow<'a, Table> {
+        self.props
+            .as_ref()
+            .map(Cow::Borrowed)
+            .unwrap_or(Cow::Owned(Table::new()))
     }
 
     fn props_option(&self) -> &Option<Table> {
         &self.props
     }
 
-    fn string_props(&self) -> AHashMap<String,String> {
+    fn string_props(&self) -> AHashMap<String, String> {
         to_string_map(self.props().as_ref())
     }
 }
 
-fn merge_property<T: Copy + Eq>(current_value_option: Option<T>, new_value_option: Option<T>, dirty: bool) -> (Option<T>, bool) {
+fn merge_property<T: Copy + Eq>(
+    current_value_option: Option<T>,
+    new_value_option: Option<T>,
+    dirty: bool,
+) -> (Option<T>, bool) {
     match (current_value_option, new_value_option) {
-        (Some(current_value), Some(new_value)) =>
+        (Some(current_value), Some(new_value)) => {
             if new_value == current_value {
                 (current_value_option, dirty)
             } else {
                 (new_value_option, true)
-            },
+            }
+        }
         (None, Some(_)) => (new_value_option, true),
-        (_, _) => (current_value_option, dirty)
+        (_, _) => (current_value_option, dirty),
     }
 }
 
-fn merge_props<'a>(current_props_option: &'a Option<Table>, new_props_option: &'a Option<Table>, dirty: bool) -> (Cow<'a, Table>, bool) {
+fn merge_props<'a>(
+    current_props_option: &'a Option<Table>,
+    new_props_option: &'a Option<Table>,
+    dirty: bool,
+) -> (Cow<'a, Table>, bool) {
     if let Some(current_props) = current_props_option {
         if let Some(new_props) = new_props_option {
             for (k, v) in new_props {
@@ -220,7 +261,7 @@ fn merge_props<'a>(current_props_option: &'a Option<Table>, new_props_option: &'
                     let mut result = current_props.clone();
                     let new_props = new_props.clone();
                     result.extend(new_props);
-                    return (Cow::Owned(result), true)
+                    return (Cow::Owned(result), true);
                 }
             }
             (Cow::Borrowed(current_props), dirty)
@@ -234,8 +275,13 @@ fn merge_props<'a>(current_props_option: &'a Option<Table>, new_props_option: &'
     }
 }
 
-fn to_string_map(props: &Table) -> AHashMap<String,String> {
-    props.iter().map(to_strings).filter(Option::is_some).map(Option::unwrap).collect()
+fn to_string_map(props: &Table) -> AHashMap<String, String> {
+    props
+        .iter()
+        .map(to_strings)
+        .filter(Option::is_some)
+        .map(Option::unwrap)
+        .collect()
 }
 
 fn to_strings(entry: (&String, &Value)) -> Option<(String, String)> {
@@ -248,8 +294,8 @@ fn to_strings(entry: (&String, &Value)) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use super::super::serde_test_utils::insert_entry;
+    use super::*;
     use crate::config_model::WriteMode::*;
     use test_log::test;
 
@@ -443,7 +489,9 @@ mod test {
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
-        let invar_config = new_invar_state().with_props(old_mapping.clone()).into_owned();
+        let invar_config = new_invar_state()
+            .with_props(old_mapping.clone())
+            .into_owned();
         let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "foo", "bar");
 
@@ -462,7 +510,9 @@ mod test {
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
-        let invar_state = new_invar_state().with_props(old_mapping.clone()).into_owned();
+        let invar_state = new_invar_state()
+            .with_props(old_mapping.clone())
+            .into_owned();
         let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "foo", "beep");
 
@@ -483,7 +533,9 @@ mod test {
         insert_entry(&mut old_mapping, "foo", "bar");
         insert_entry(&mut old_mapping, "food", "baz");
         let old_mapping = old_mapping; // No longer mutable
-        let invar_state = new_invar_state().with_props(old_mapping.clone()).into_owned();
+        let invar_state = new_invar_state()
+            .with_props(old_mapping.clone())
+            .into_owned();
         let mut new_mapping = Table::new();
         insert_entry(&mut new_mapping, "oh", "joy");
 
@@ -516,7 +568,6 @@ mod test {
     }
 
     // Utility functions
-
 
     fn new_invar_state() -> impl InvarState {
         InvarStateData::new()
